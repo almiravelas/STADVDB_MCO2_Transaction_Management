@@ -30,6 +30,7 @@ The MySQL database is hosted on a Proxmox VM. You must ensure it's running first
 Follow these steps from your local machine's terminal.
 
 1.  **Navigate to the `db` directory:**
+python -m venv venv
 
 2.  **Activate the virtual environment:**
 
