@@ -3,6 +3,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
 const { node0, node1, node2 } = require('./db/connection');
+const exphbs = require('express-handlebars');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,11 +11,20 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static('public'));
+app.use(express.static('public', { index: false }));
 
-// Root endpoint
+// View engine (Handlebars)
+app.engine('hbs', exphbs.engine({
+  extname: '.hbs',
+  defaultLayout: 'main',
+  layoutsDir: path.join(__dirname, 'views', 'layouts')
+}));
+app.set('view engine', 'hbs');
+app.set('views', path.join(__dirname, 'views'));
+
+// Root endpoint (rendered)
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.render('index');
 });
 
 // Health check - Test all nodes with row counts
