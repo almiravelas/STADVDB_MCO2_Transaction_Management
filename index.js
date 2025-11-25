@@ -3,6 +3,8 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
 const { node0, node1, node2 } = require('./db/connection');
+const db_service = require('./models/db_service'); 
+const exphbs = require('express-handlebars');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,27 +12,105 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static('public'));
+app.use(express.static('public', { index: false }));
 
-// Root endpoint
+// View engine (Handlebars)
+app.engine('hbs', exphbs.engine({
+  extname: '.hbs',
+  defaultLayout: false, 
+}));
+app.set('view engine', 'hbs');
+app.set('views', path.join(__dirname, 'views'));
+
+// Root endpoint (rendered)
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.render('index');
 });
 
-// Health check - Test all nodes
+// ==========================================
+//  PART 1: DISTRIBUTED TRANSACTION ENDPOINTS
+// ==========================================
+
+// 1. CREATE USER
+app.post('/api/users', async (req, res) => {
+    try {
+        const result = await db_service.createUser(req.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 2. GET USER (By ID or Country)
+app.get('/api/users/search', async (req, res) => {
+    const { id, country } = req.query;
+    try {
+        if (id) {
+            // Strategy 1: Central Lookup
+            const user = await db_service.getUserById(id);
+            if (!user) return res.status(404).json({ error: "User not found" });
+            res.json(user);
+        } else if (country) {
+            // Strategy 2: Partition Lookup
+            const users = await db_service.getUsersByCountry(country);
+            res.json(users);
+        } else {
+            res.status(400).json({ error: "Please provide 'id' or 'country'" });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 3. UPDATE USER
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        const result = await db_service.updateUser(req.params.id, req.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 4. DELETE USER
+app.delete('/api/users/:id', async (req, res) => {
+    try {
+        const result = await db_service.deleteUser(req.params.id);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+//  PART 2: DIAGNOSTIC & HEALTH ENDPOINTS
+// ==========================================
+
+// Health check - Test all nodes with row counts
 app.get('/api/health', async (req, res) => {
   const results = {
-    node0: { port: 60826, status: 'unknown' },
-    node1: { port: 60827, status: 'unknown' },
-    node2: { port: 60828, status: 'unknown' }
+    node0: { port: process.env.NODE0_PORT || 60826, status: 'unknown' },
+    node1: { port: process.env.NODE1_PORT || 60827, status: 'unknown' },
+    node2: { port: process.env.NODE2_PORT || 60828, status: 'unknown' }
   };
 
   // Test Node 0
   try {
-    const [rows] = await node0.query('SELECT DATABASE() as db, VERSION() as version');
+    const [info] = await node0.query('SELECT DATABASE() as db, VERSION() as version');
+    const [tables] = await node0.query('SHOW TABLES');
+    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    let rowCount = 0;
+    if (tableName) {
+      const [count] = await node0.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+      rowCount = count[0].count;
+    }
+    
     results.node0.status = 'connected';
-    results.node0.database = rows[0].db;
-    results.node0.version = rows[0].version;
+    results.node0.database = info[0].db;
+    results.node0.version = info[0].version;
+    results.node0.table = tableName;
+    results.node0.rowCount = rowCount;
   } catch (error) {
     results.node0.status = 'failed';
     results.node0.error = error.message;
@@ -38,10 +118,21 @@ app.get('/api/health', async (req, res) => {
 
   // Test Node 1
   try {
-    const [rows] = await node1.query('SELECT DATABASE() as db, VERSION() as version');
+    const [info] = await node1.query('SELECT DATABASE() as db, VERSION() as version');
+    const [tables] = await node1.query('SHOW TABLES');
+    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    let rowCount = 0;
+    if (tableName) {
+      const [count] = await node1.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+      rowCount = count[0].count;
+    }
+    
     results.node1.status = 'connected';
-    results.node1.database = rows[0].db;
-    results.node1.version = rows[0].version;
+    results.node1.database = info[0].db;
+    results.node1.version = info[0].version;
+    results.node1.table = tableName;
+    results.node1.rowCount = rowCount;
   } catch (error) {
     results.node1.status = 'failed';
     results.node1.error = error.message;
@@ -49,10 +140,21 @@ app.get('/api/health', async (req, res) => {
 
   // Test Node 2
   try {
-    const [rows] = await node2.query('SELECT DATABASE() as db, VERSION() as version');
+    const [info] = await node2.query('SELECT DATABASE() as db, VERSION() as version');
+    const [tables] = await node2.query('SHOW TABLES');
+    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    let rowCount = 0;
+    if (tableName) {
+      const [count] = await node2.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+      rowCount = count[0].count;
+    }
+    
     results.node2.status = 'connected';
-    results.node2.database = rows[0].db;
-    results.node2.version = rows[0].version;
+    results.node2.database = info[0].db;
+    results.node2.version = info[0].version;
+    results.node2.table = tableName;
+    results.node2.rowCount = rowCount;
   } catch (error) {
     results.node2.status = 'failed';
     results.node2.error = error.message;
@@ -61,35 +163,210 @@ app.get('/api/health', async (req, res) => {
   res.json(results);
 });
 
-// Test specific node
+// Test specific node with detailed info
 app.get('/api/node/:id', async (req, res) => {
   const nodeId = parseInt(req.params.id);
-  const nodes = { 0: node0, 1: node1, 2: node2 };
-  const ports = { 0: 60826, 1: 60827, 2: 60828 };
-  if (!nodes[nodeId]) {
-    return res.status(400).json({ error: 'Invalid node ID' });
+  
+  const nodeMap = {
+    1: { pool: node0, port: process.env.NODE0_PORT, name: 'Node 1 (Central)' },
+    2: { pool: node1, port: process.env.NODE1_PORT, name: 'Node 2 (Partition 1)' },
+    3: { pool: node2, port: process.env.NODE2_PORT, name: 'Node 3 (Partition 2)' }
+  };
+  
+  if (!nodeMap[nodeId]) {
+    return res.status(400).json({ error: 'Invalid node ID. Use 1, 2, or 3.' });
   }
 
   try {
-    const [rows] = await nodes[nodeId].query('SELECT DATABASE() as db, VERSION() as version');
+    const pool = nodeMap[nodeId].pool;
+    const [info] = await pool.query('SELECT DATABASE() as db, VERSION() as version');
+    const [tables] = await pool.query('SHOW TABLES');
+    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    let rowCount = 0;
+    let sampleData = [];
+    
+    if (tableName) {
+      const [count] = await pool.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+      rowCount = count[0].count;
+      const [samples] = await pool.query(`SELECT * FROM ${tableName} LIMIT 5`);
+      sampleData = samples;
+    }
+    
     res.json({
       node: nodeId,
-      port: ports[nodeId],
+      name: nodeMap[nodeId].name,
+      port: nodeMap[nodeId].port,
       status: 'connected',
-      database: rows[0].db,
-      version: rows[0].version
+      database: info[0].db,
+      version: info[0].version,
+      table: tableName,
+      rowCount: rowCount,
+      sampleData: sampleData
     });
   } catch (error) {
     res.status(500).json({
       node: nodeId,
-      port: ports[nodeId],
+      name: nodeMap[nodeId].name,
+      port: nodeMap[nodeId].port,
       status: 'failed',
-      error: error.message
+      error: error.message,
+      code: error.code
     });
+  }
+});
+
+// Get sample data from a specific node
+app.get('/api/node/:id/data', async (req, res) => {
+  const nodeId = parseInt(req.params.id);
+  const limit = parseInt(req.query.limit) || 5;
+  
+  const nodeMap = {
+    1: { pool: node0, name: 'Node 1 (Central)' },
+    2: { pool: node1, name: 'Node 2 (Partition 1)' },
+    3: { pool: node2, name: 'Node 3 (Partition 2)' }
+  };
+  
+  if (!nodeMap[nodeId]) {
+    return res.status(400).json({ error: 'Invalid node ID. Use 1, 2, or 3.' });
+  }
+
+  try {
+    const pool = nodeMap[nodeId].pool;
+    const [tables] = await pool.query('SHOW TABLES');
+    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    if (!tableName) {
+      return res.json({ node: nodeId, message: 'No tables found', data: [] });
+    }
+    
+    const [data] = await pool.query(`SELECT * FROM ${tableName} LIMIT ?`, [limit]);
+    const [count] = await pool.query(`SELECT COUNT(*) as count FROM ${tableName}`);
+    
+    res.json({
+      node: nodeId,
+      name: nodeMap[nodeId].name,
+      table: tableName,
+      totalRows: count[0].count,
+      showing: data.length,
+      data: data
+    });
+  } catch (error) {
+    res.status(500).json({ node: nodeId, error: error.message });
+  }
+});
+
+// Get row count for a specific table on a node
+app.get('/api/node/:id/count', async (req, res) => {
+  const nodeId = parseInt(req.params.id);
+  const tableName = req.query.table;
+  
+  const nodeMap = {
+    1: { pool: node0, name: 'Node 1 (Central)' },
+    2: { pool: node1, name: 'Node 2 (Partition 1)' },
+    3: { pool: node2, name: 'Node 3 (Partition 2)' }
+  };
+  
+  if (!nodeMap[nodeId]) {
+    return res.status(400).json({ error: 'Invalid node ID. Use 1, 2, or 3.' });
+  }
+
+  try {
+    const pool = nodeMap[nodeId].pool;
+    let table = tableName;
+    if (!table) {
+      const [tables] = await pool.query('SHOW TABLES');
+      table = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    }
+    
+    if (!table) {
+      return res.json({ node: nodeId, error: 'No table found' });
+    }
+    
+    const [count] = await pool.query(`SELECT COUNT(*) as count FROM ${table}`);
+    res.json({
+      node: nodeId,
+      name: nodeMap[nodeId].name,
+      table: table,
+      rowCount: count[0].count
+    });
+  } catch (error) {
+    res.status(500).json({ node: nodeId, error: error.message });
+  }
+});
+
+// Compare data across all nodes
+app.get('/api/compare', async (req, res) => {
+  try {
+    const comparison = {
+      node1: { name: 'Node 1 (Central)', status: 'unknown' },
+      node2: { name: 'Node 2 (Partition 1)', status: 'unknown' },
+      node3: { name: 'Node 3 (Partition 2)', status: 'unknown' }
+    };
+
+    // Node 1
+    try {
+      const [tables1] = await node0.query('SHOW TABLES');
+      const table1 = tables1.length > 0 ? Object.values(tables1[0])[0] : null;
+      if (table1) {
+        const [count1] = await node0.query(`SELECT COUNT(*) as count FROM ${table1}`);
+        comparison.node1 = { ...comparison.node1, status: 'connected', table: table1, rowCount: count1[0].count };
+      }
+    } catch (error) {
+      comparison.node1.status = 'failed';
+      comparison.node1.error = error.message;
+    }
+
+    // Node 2
+    try {
+      const [tables2] = await node1.query('SHOW TABLES');
+      const table2 = tables2.length > 0 ? Object.values(tables2[0])[0] : null;
+      if (table2) {
+        const [count2] = await node1.query(`SELECT COUNT(*) as count FROM ${table2}`);
+        comparison.node2 = { ...comparison.node2, status: 'connected', table: table2, rowCount: count2[0].count };
+      }
+    } catch (error) {
+      comparison.node2.status = 'failed';
+      comparison.node2.error = error.message;
+    }
+
+    // Node 3
+    try {
+      const [tables3] = await node2.query('SHOW TABLES');
+      const table3 = tables3.length > 0 ? Object.values(tables3[0])[0] : null;
+      if (table3) {
+        const [count3] = await node2.query(`SELECT COUNT(*) as count FROM ${table3}`);
+        comparison.node3 = { ...comparison.node3, status: 'connected', table: table3, rowCount: count3[0].count };
+      }
+    } catch (error) {
+      comparison.node3.status = 'failed';
+      comparison.node3.error = error.message;
+    }
+
+    // Add validation
+    comparison.validation = {
+      allConnected: comparison.node1.status === 'connected' && 
+                    comparison.node2.status === 'connected' && 
+                    comparison.node3.status === 'connected',
+      partitionsMatch: (comparison.node2.rowCount + comparison.node3.rowCount) === comparison.node1.rowCount
+    };
+
+    res.json(comparison);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`\nServer running on http://localhost:${PORT}`);
   console.log(`Test: http://localhost:${PORT}/api/health\n`);
+  console.log('Available endpoints:');
+  console.log('  GET /api/health - Test all nodes with row counts');
+  console.log('  GET /api/node/:id - Get detailed info for node (1, 2, or 3)');
+  console.log('  GET /api/node/:id/data?limit=5 - Get sample data from node');
+  console.log('  GET /api/compare - Compare data across all nodes');
+  console.log('  POST /api/users - Create User');
+  console.log('  GET /api/users/search - Search User');
+  console.log('  PUT /api/users/:id - Update User');
+  console.log('  DELETE /api/users/:id - Delete User\n');
 });

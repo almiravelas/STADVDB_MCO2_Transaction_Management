@@ -93,3 +93,4 @@ secrets/
 
 # Documentation build files
 docs/_build/
+fragment.js
