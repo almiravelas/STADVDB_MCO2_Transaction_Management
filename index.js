@@ -3,6 +3,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
 const { node0, node1, node2 } = require('./db/connection');
+const db_service = require('./models/db_service'); 
 const exphbs = require('express-handlebars');
 
 const app = express();
@@ -16,8 +17,7 @@ app.use(express.static('public', { index: false }));
 // View engine (Handlebars)
 app.engine('hbs', exphbs.engine({
   extname: '.hbs',
-  defaultLayout: 'main',
-  layoutsDir: path.join(__dirname, 'views', 'layouts')
+  defaultLayout: false, 
 }));
 app.set('view engine', 'hbs');
 app.set('views', path.join(__dirname, 'views'));
@@ -27,12 +27,71 @@ app.get('/', (req, res) => {
   res.render('index');
 });
 
+// ==========================================
+//  PART 1: DISTRIBUTED TRANSACTION ENDPOINTS
+// ==========================================
+
+// 1. CREATE USER
+app.post('/api/users', async (req, res) => {
+    try {
+        const result = await db_service.createUser(req.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 2. GET USER (By ID or Country)
+app.get('/api/users/search', async (req, res) => {
+    const { id, country } = req.query;
+    try {
+        if (id) {
+            // Strategy 1: Central Lookup
+            const user = await db_service.getUserById(id);
+            if (!user) return res.status(404).json({ error: "User not found" });
+            res.json(user);
+        } else if (country) {
+            // Strategy 2: Partition Lookup
+            const users = await db_service.getUsersByCountry(country);
+            res.json(users);
+        } else {
+            res.status(400).json({ error: "Please provide 'id' or 'country'" });
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 3. UPDATE USER
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        const result = await db_service.updateUser(req.params.id, req.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 4. DELETE USER
+app.delete('/api/users/:id', async (req, res) => {
+    try {
+        const result = await db_service.deleteUser(req.params.id);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+//  PART 2: DIAGNOSTIC & HEALTH ENDPOINTS
+// ==========================================
+
 // Health check - Test all nodes with row counts
 app.get('/api/health', async (req, res) => {
   const results = {
-    node0: { port: 60826, status: 'unknown' },
-    node1: { port: 60827, status: 'unknown' },
-    node2: { port: 60828, status: 'unknown' }
+    node0: { port: process.env.NODE0_PORT || 60826, status: 'unknown' },
+    node1: { port: process.env.NODE1_PORT || 60827, status: 'unknown' },
+    node2: { port: process.env.NODE2_PORT || 60828, status: 'unknown' }
   };
 
   // Test Node 0
@@ -108,11 +167,10 @@ app.get('/api/health', async (req, res) => {
 app.get('/api/node/:id', async (req, res) => {
   const nodeId = parseInt(req.params.id);
   
-  // Map display node IDs (1,2,3) to actual nodes (0,1,2) with correct ports
   const nodeMap = {
-    1: { pool: node0, port: 60826, name: 'Node 1 (Central)' },
-    2: { pool: node1, port: 60827, name: 'Node 2 (Partition 1)' },
-    3: { pool: node2, port: 60828, name: 'Node 3 (Partition 2)' }
+    1: { pool: node0, port: process.env.NODE0_PORT, name: 'Node 1 (Central)' },
+    2: { pool: node1, port: process.env.NODE1_PORT, name: 'Node 2 (Partition 1)' },
+    3: { pool: node2, port: process.env.NODE2_PORT, name: 'Node 3 (Partition 2)' }
   };
   
   if (!nodeMap[nodeId]) {
@@ -121,11 +179,7 @@ app.get('/api/node/:id', async (req, res) => {
 
   try {
     const pool = nodeMap[nodeId].pool;
-    
-    // Get basic info
     const [info] = await pool.query('SELECT DATABASE() as db, VERSION() as version');
-    
-    // Get tables
     const [tables] = await pool.query('SHOW TABLES');
     const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
     
@@ -133,11 +187,8 @@ app.get('/api/node/:id', async (req, res) => {
     let sampleData = [];
     
     if (tableName) {
-      // Get row count
       const [count] = await pool.query(`SELECT COUNT(*) as count FROM ${tableName}`);
       rowCount = count[0].count;
-      
-      // Get sample 5 rows
       const [samples] = await pool.query(`SELECT * FROM ${tableName} LIMIT 5`);
       sampleData = samples;
     }
@@ -182,23 +233,14 @@ app.get('/api/node/:id/data', async (req, res) => {
 
   try {
     const pool = nodeMap[nodeId].pool;
-    
-    // Get tables
     const [tables] = await pool.query('SHOW TABLES');
     const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
     
     if (!tableName) {
-      return res.json({
-        node: nodeId,
-        message: 'No tables found in database',
-        data: []
-      });
+      return res.json({ node: nodeId, message: 'No tables found', data: [] });
     }
     
-    // Get sample data
     const [data] = await pool.query(`SELECT * FROM ${tableName} LIMIT ?`, [limit]);
-    
-    // Get total count
     const [count] = await pool.query(`SELECT COUNT(*) as count FROM ${tableName}`);
     
     res.json({
@@ -210,10 +252,7 @@ app.get('/api/node/:id/data', async (req, res) => {
       data: data
     });
   } catch (error) {
-    res.status(500).json({
-      node: nodeId,
-      error: error.message
-    });
+    res.status(500).json({ node: nodeId, error: error.message });
   }
 });
 
@@ -234,8 +273,6 @@ app.get('/api/node/:id/count', async (req, res) => {
 
   try {
     const pool = nodeMap[nodeId].pool;
-    
-    // If no table specified, get first table
     let table = tableName;
     if (!table) {
       const [tables] = await pool.query('SHOW TABLES');
@@ -243,14 +280,10 @@ app.get('/api/node/:id/count', async (req, res) => {
     }
     
     if (!table) {
-      return res.json({
-        node: nodeId,
-        error: 'No table found'
-      });
+      return res.json({ node: nodeId, error: 'No table found' });
     }
     
     const [count] = await pool.query(`SELECT COUNT(*) as count FROM ${table}`);
-    
     res.json({
       node: nodeId,
       name: nodeMap[nodeId].name,
@@ -258,10 +291,7 @@ app.get('/api/node/:id/count', async (req, res) => {
       rowCount: count[0].count
     });
   } catch (error) {
-    res.status(500).json({
-      node: nodeId,
-      error: error.message
-    });
+    res.status(500).json({ node: nodeId, error: error.message });
   }
 });
 
@@ -280,12 +310,7 @@ app.get('/api/compare', async (req, res) => {
       const table1 = tables1.length > 0 ? Object.values(tables1[0])[0] : null;
       if (table1) {
         const [count1] = await node0.query(`SELECT COUNT(*) as count FROM ${table1}`);
-        comparison.node1 = {
-          ...comparison.node1,
-          status: 'connected',
-          table: table1,
-          rowCount: count1[0].count
-        };
+        comparison.node1 = { ...comparison.node1, status: 'connected', table: table1, rowCount: count1[0].count };
       }
     } catch (error) {
       comparison.node1.status = 'failed';
@@ -298,12 +323,7 @@ app.get('/api/compare', async (req, res) => {
       const table2 = tables2.length > 0 ? Object.values(tables2[0])[0] : null;
       if (table2) {
         const [count2] = await node1.query(`SELECT COUNT(*) as count FROM ${table2}`);
-        comparison.node2 = {
-          ...comparison.node2,
-          status: 'connected',
-          table: table2,
-          rowCount: count2[0].count
-        };
+        comparison.node2 = { ...comparison.node2, status: 'connected', table: table2, rowCount: count2[0].count };
       }
     } catch (error) {
       comparison.node2.status = 'failed';
@@ -316,12 +336,7 @@ app.get('/api/compare', async (req, res) => {
       const table3 = tables3.length > 0 ? Object.values(tables3[0])[0] : null;
       if (table3) {
         const [count3] = await node2.query(`SELECT COUNT(*) as count FROM ${table3}`);
-        comparison.node3 = {
-          ...comparison.node3,
-          status: 'connected',
-          table: table3,
-          rowCount: count3[0].count
-        };
+        comparison.node3 = { ...comparison.node3, status: 'connected', table: table3, rowCount: count3[0].count };
       }
     } catch (error) {
       comparison.node3.status = 'failed';
@@ -349,6 +364,9 @@ app.listen(PORT, () => {
   console.log('  GET /api/health - Test all nodes with row counts');
   console.log('  GET /api/node/:id - Get detailed info for node (1, 2, or 3)');
   console.log('  GET /api/node/:id/data?limit=5 - Get sample data from node');
-  console.log('  GET /api/node/:id/count?table=tablename - Get row count');
-  console.log('  GET /api/compare - Compare data across all nodes\n');
+  console.log('  GET /api/compare - Compare data across all nodes');
+  console.log('  POST /api/users - Create User');
+  console.log('  GET /api/users/search - Search User');
+  console.log('  PUT /api/users/:id - Update User');
+  console.log('  DELETE /api/users/:id - Delete User\n');
 });
