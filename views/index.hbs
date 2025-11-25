@@ -37,34 +37,36 @@
         <!-- CREATE -->
         <div class="card">
             <h2>1. Create User</h2>
-            <form onsubmit="handleCreate(event)">
-                <label>Manual ID</label>
-                <input type="number" name="id" placeholder="e.g. 501" required>
+<form onsubmit="handleCreate(event)">
+    <p style="font-size: 0.85rem; color: #666; margin-top: 0;">
+        ID and Created At are generated automatically on the server.
+    </p>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                    <div>
-                        <label>First Name</label>
-                        <input type="text" name="firstName" placeholder="Juan" required>
-                    </div>
-                    <div>
-                        <label>Last Name</label>
-                        <input type="text" name="lastName" placeholder="Dela Cruz" required>
-                    </div>
-                </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div>
+            <label>First Name</label>
+            <input type="text" name="firstName" placeholder="Juan" required>
+        </div>
+        <div>
+            <label>Last Name</label>
+            <input type="text" name="lastName" placeholder="Dela Cruz" required>
+        </div>
+    </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                    <div>
-                        <label>City</label>
-                        <input type="text" name="city" placeholder="Manila" required>
-                    </div>
-                    <div>
-                        <label>Country (Key)</label>
-                        <input type="text" name="country" placeholder="Philippines" required>
-                    </div>
-                </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div>
+            <label>City</label>
+            <input type="text" name="city" placeholder="Manila" required>
+        </div>
+        <div>
+            <label>Country (Key)</label>
+            <input type="text" name="country" placeholder="Philippines" required>
+        </div>
+    </div>
 
-                <button type="submit">Create User</button>
-            </form>
+    <button type="submit">Create User</button>
+</form>
+
         </div>
 
         <!-- READ -->
@@ -138,7 +140,12 @@
             e.preventDefault();
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData.entries());
+
+            // FIX: Explicitly remove ID to prevent sending "id": ""
+            if (data.id) delete data.id; 
+
             document.getElementById('output').innerHTML = 'Creating user...';
+            
             try {
                 const res = await fetch('/api/users', {
                     method: 'POST',
