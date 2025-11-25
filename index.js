@@ -342,6 +342,9 @@ app.get('/api/compare', async (req, res) => {
   }
 });
 
+const recoveryRoutes = require('./routes/recoveryRoutes');
+app.use('/recovery', recoveryRoutes);
+
 app.listen(PORT, () => {
   console.log(`\nServer running on http://localhost:${PORT}`);
   console.log(`Test: http://localhost:${PORT}/api/health\n`);
