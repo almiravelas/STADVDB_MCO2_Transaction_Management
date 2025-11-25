@@ -1,51 +1,247 @@
-<h1>STADVDB MCO2 - Node Testing</h1>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Distributed DB Manager</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; max-width: 1100px; margin: 0 auto; padding: 20px; background: #f4f4f9; }
+        h1 { text-align: center; color: #333; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; font-size: 1.1rem; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        
+        /* Form Elements */
+        label { display: block; margin: 10px 0 5px; font-weight: bold; font-size: 0.9rem; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; margin-top: 10px; width: 100%; }
+        button:hover { background: #0056b3; }
+        button.delete { background: #dc3545; }
+        button.delete:hover { background: #c82333; }
+        button.secondary { background: #6c757d; }
+        
+        /* Output Area */
+        pre { background: #2d2d2d; color: #76ff03; padding: 15px; border-radius: 4px; overflow-x: auto; min-height: 150px; font-size: 0.9rem; }
+        .status { margin-bottom: 20px; padding: 10px; background: #e8f5e9; border: 1px solid #c8e6c9; color: #2e7d32; border-radius: 4px; display: none; }
 
-<div class="controls">
-    <button onclick="testAllNodes()">Test All Nodes</button>
-    <button onclick="testNode(1)">Test Node 1</button>
-    <button onclick="testNode(2)">Test Node 2</button>
-    <button onclick="testNode(3)">Test Node 3</button>
-    <button onclick="compareNodes()">Compare Nodes</button>
-</div>
+        /* Diagnostic Controls */
+        .controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 20px 0; }
+        .controls button { width: auto; min-width: 120px; }
+    </style>
+</head>
+<body>
 
-<hr>
+    <h1>Distributed Database System - Management & Diagnostics</h1>
+    <div id="statusBox" class="status"></div>
 
-<div id="output">Click a button to test nodes</div>
+    <!-- PART 1: CRUD MANAGEMENT -->
+    <div class="grid">
+        <!-- CREATE -->
+        <div class="card">
+            <h2>1. Create User</h2>
+<form onsubmit="handleCreate(event)">
+    <p style="font-size: 0.85rem; color: #666; margin-top: 0;">
+        ID and Created At are generated automatically on the server.
+    </p>
 
-<script>
-    async function testAllNodes() {
-        document.getElementById('output').innerHTML = 'Loading...';
-        try {
-            const response = await fetch('/api/health');
-            const data = await response.json();
-            document.getElementById('output').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-        } catch (error) {
-            document.getElementById('output').innerHTML = 'Error: ' + error.message;
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div>
+            <label>First Name</label>
+            <input type="text" name="firstName" placeholder="Juan" required>
+        </div>
+        <div>
+            <label>Last Name</label>
+            <input type="text" name="lastName" placeholder="Dela Cruz" required>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div>
+            <label>City</label>
+            <input type="text" name="city" placeholder="Manila" required>
+        </div>
+        <div>
+            <label>Country (Key)</label>
+            <input type="text" name="country" placeholder="Philippines" required>
+        </div>
+    </div>
+
+    <button type="submit">Create User</button>
+</form>
+
+        </div>
+
+        <!-- READ -->
+        <div class="card">
+            <h2>2. Search User</h2>
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                <button onclick="searchById()" class="secondary">By ID</button>
+                <button onclick="searchByCountry()" class="secondary">By Country</button>
+            </div>
+            <input type="text" id="searchInput" placeholder="Enter ID or Country...">
+        </div>
+
+        <!-- UPDATE -->
+        <div class="card">
+            <h2>3. Update User</h2>
+            <form onsubmit="handleUpdate(event)">
+                <label>Target User ID</label>
+                <input type="number" name="id" required>
+                
+                <label>New Last Name</label>
+                <input type="text" name="lastName">
+                
+                <label>New Address</label>
+                <input type="text" name="address1">
+                
+                <button type="submit" style="background: #ffc107; color: #000;">Update User</button>
+            </form>
+        </div>
+
+        <!-- DELETE -->
+        <div class="card">
+            <h2>4. Delete User</h2>
+            <form onsubmit="handleDelete(event)">
+                <label>Target User ID</label>
+                <input type="number" name="id" required>
+                <button type="submit" class="delete">Delete User (Distributed)</button>
+            </form>
+        </div>
+    </div>
+
+    <hr>
+
+    <!-- PART 2: DIAGNOSTICS -->
+    <h2 style="text-align:center; border:none; margin-top:20px;">Node Diagnostics</h2>
+    <div class="controls">
+        <button onclick="testAllNodes()">Test All Nodes</button>
+        <button onclick="testNode(1)">Test Node 1</button>
+        <button onclick="testNode(2)">Test Node 2</button>
+        <button onclick="testNode(3)">Test Node 3</button>
+        <button onclick="compareNodes()">Compare Nodes</button>
+    </div>
+
+    <h3>System Output / Logs</h3>
+    <pre id="output">System ready...</pre>
+
+    <script>
+        const log = (data) => {
+            const el = document.getElementById('output');
+            el.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        };
+
+        const showStatus = (msg) => {
+            const el = document.getElementById('statusBox');
+            el.innerText = msg;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 3000);
+        };
+
+        /* --- CRUD HANDLERS --- */
+        async function handleCreate(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+
+            // FIX: Explicitly remove ID to prevent sending "id": ""
+            if (data.id) delete data.id; 
+
+            document.getElementById('output').innerHTML = 'Creating user...';
+            
+            try {
+                const res = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                log(result);
+                if(result.success) showStatus(result.message);
+            } catch (err) { log({ error: err.message }); }
         }
-    }
 
-    async function testNode(nodeId) {
-        document.getElementById('output').innerHTML = 'Loading...';
-        try {
-            const response = await fetch('/api/node/' + nodeId);
-            const data = await response.json();
-            document.getElementById('output').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-        } catch (error) {
-            document.getElementById('output').innerHTML = 'Error: ' + error.message;
+        async function searchById() {
+            const id = document.getElementById('searchInput').value;
+            try {
+                const res = await fetch(`/api/users/search?id=${id}`);
+                const result = await res.json();
+                log(result);
+            } catch (err) { log({ error: err.message }); }
         }
-    }
 
-    async function compareNodes() {
-        document.getElementById('output').innerHTML = 'Loading...';
-        try {
-            const response = await fetch('/api/compare');
-            const data = await response.json();
-            document.getElementById('output').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-        } catch (error) {
-            document.getElementById('output').innerHTML = 'Error: ' + error.message;
+        async function searchByCountry() {
+            const country = document.getElementById('searchInput').value;
+            try {
+                const res = await fetch(`/api/users/search?country=${country}`);
+                const result = await res.json();
+                log(result);
+            } catch (err) { log({ error: err.message }); }
         }
-    }
 
-    // Auto-test on load
-    window.onload = () => testAllNodes();
-</script>
+        async function handleUpdate(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+            const id = data.id;
+            delete data.id; 
+            Object.keys(data).forEach(key => data[key] === '' && delete data[key]);
+            
+            document.getElementById('output').innerHTML = 'Updating user...';
+            try {
+                const res = await fetch(`/api/users/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                log(result);
+                if(result.success) showStatus(result.message);
+            } catch (err) { log({ error: err.message }); }
+        }
+
+        async function handleDelete(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const id = formData.get('id');
+            if(!confirm(`Delete User ${id}? This will remove them from Central and Partition nodes.`)) return;
+
+            document.getElementById('output').innerHTML = 'Deleting user...';
+            try {
+                const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+                const result = await res.json();
+                log(result);
+                if(result.success) showStatus(result.message);
+            } catch (err) { log({ error: err.message }); }
+        }
+
+        /* --- DIAGNOSTIC HANDLERS --- */
+        async function testAllNodes() {
+            document.getElementById('output').innerHTML = 'Testing all nodes...';
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                log(data);
+            } catch (error) { log({ error: error.message }); }
+        }
+
+        async function testNode(nodeId) {
+            document.getElementById('output').innerHTML = `Testing Node ${nodeId}...`;
+            try {
+                const response = await fetch('/api/node/' + nodeId);
+                const data = await response.json();
+                log(data);
+            } catch (error) { log({ error: error.message }); }
+        }
+
+        async function compareNodes() {
+            document.getElementById('output').innerHTML = 'Comparing node data...';
+            try {
+                const response = await fetch('/api/compare');
+                const data = await response.json();
+                log(data);
+            } catch (error) { log({ error: error.message }); }
+        }
+
+        // Auto-test on load
+        window.onload = () => testAllNodes();
+    </script>
+</body>
+</html>
