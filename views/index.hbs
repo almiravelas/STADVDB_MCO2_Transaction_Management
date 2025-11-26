@@ -24,7 +24,7 @@
             <button class="nav-item" data-view="country"><i class='bx bxs-map-alt'></i><span class="nav-text">Filter Location</span></button>
             <button class="nav-item" data-view="viewall"><i class='bx bxs-folder'></i><span class="nav-text">View All Data</span></button>
             <div style="margin-top:auto; padding-top:20px; border-top:1px solid rgba(255,255,255,0.2);">
-                 <button class="nav-item" data-view="health"><i class='bx bx-pulse'></i><span class="nav-text">System Health</span></button>
+                <button class="nav-item" data-view="health"><i class='bx bx-pulse'></i><span class="nav-text">System Health</span></button>
             </div>
         </nav>
     </aside>
@@ -306,7 +306,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('resultId').innerText = u.id;
                 document.getElementById('resultCity').innerText = u.city;
                 
-                // Bind the buttons in search result
                 document.getElementById('btnEditSearch').onclick = () => editUser(u.id, u.firstName, u.lastName, u.username, u.city, u.country);
                 document.getElementById('btnDeleteSearch').onclick = () => deleteUser(u.id, u.firstName);
                 
@@ -341,7 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else { box.innerHTML = '<p style="color:#aaa;">No users found.</p>'; }
     };
 
-    // 7. VIEW ALL (UPDATED WITH SOFT BUTTONS)
+    // 7. VIEW ALL
     window.loadAllData = async () => {
         const tbody = document.getElementById('allDataTableBody');
         tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
