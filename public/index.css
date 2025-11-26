@@ -69,7 +69,7 @@ body {
 .card-purple h1 { font-size: 56px; margin: 5px 0; line-height: 1; }
 
 .card-pink {
-    background: linear-gradient(135deg, #FF9A9E 0%, #FECFEF 100%);
+    background: linear-gradient(135deg, #fa3b9b 0%, #ff7fbf 100%);
     border-radius: var(--radius); padding: 30px; color: white;
     box-shadow: 0 15px 35px rgba(255, 107, 157, 0.2);
     display: flex; flex-direction: column; gap: 15px; justify-content: center;
