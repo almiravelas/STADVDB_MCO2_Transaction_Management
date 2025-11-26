@@ -1,10 +1,9 @@
-/* public/index.css */
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
 :root {
     --bg-body: #F4F7FE;
-    --primary: #6C5CE7; /* Vibrant Purple */
-    --primary-light: #ECE9FF; /* Light Purple for Icons */
+    --primary: #6C5CE7;
+    --primary-light: #ECE9FF;
     --text-dark: #2B3674;
     --text-grey: #A3AED0;
     --white: #ffffff;
@@ -133,10 +132,8 @@ body {
 }
 .btn-soft i { font-size: 18px; }
 
-/* Blue Edit */
 .btn-soft-blue { background: #E0F2FE; color: #0EA5E9; }
 .btn-soft-blue:hover { background: #0EA5E9; color: white; }
-/* Red Delete */
 .btn-soft-red { background: #FFE4E6; color: #F43F5E; }
 .btn-soft-red:hover { background: #F43F5E; color: white; }
 
