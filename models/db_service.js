@@ -1,6 +1,9 @@
 const db_router = require('../models/db_router');
 const db_access = require('../models/db_access');
 
+// For pausing execution
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 class db_service {
 
     // ---------------------------------------------------
@@ -182,6 +185,83 @@ class db_service {
             if (centralConn) await centralConn.rollback();
             if (partitionConn) await partitionConn.rollback();
             throw error;
+        } finally {
+            if (centralConn) centralConn.release();
+            if (partitionConn) partitionConn.release();
+        }
+    }
+
+    // =========================================================
+    // CONCURRENCY SIMULATION
+    // =========================================================
+    static async simulateTransaction({ id, type, isolation, sleepTime, updateText }) {
+        // 1. Determine Nodes (We assume the user exists for simulation)
+        const centralPool = db_router.getCentralNode();
+        
+        let centralConn, partitionConn;
+        let logs = [];
+        const startTime = Date.now();
+
+        try {
+            // Get user info first (outside the test transaction) to find the partition
+            let user = await this.getUserById(id); 
+            if(!user) throw new Error(`User ${id} not found for simulation.`);
+            const partitionPool = db_router.getPartitionNode(user.country);
+
+            centralConn = await centralPool.getConnection();
+            partitionConn = await partitionPool.getConnection();
+
+            logs.push(`[${Date.now() - startTime}ms] Connections Acquired.`);
+
+            // 2. SET ISOLATION LEVEL
+            await db_access.setIsolationLevel(centralConn, isolation);
+            await db_access.setIsolationLevel(partitionConn, isolation);
+            logs.push(`[${Date.now() - startTime}ms] Isolation set to ${isolation}`);
+
+            // 3. START TRANSACTION
+            await centralConn.beginTransaction();
+            await partitionConn.beginTransaction();
+            logs.push(`[${Date.now() - startTime}ms] Transaction Started.`);
+
+            // 4. PERFORM ACTION
+            if (type === 'WRITE') {
+                const newData = { firstName: updateText || `UPDATED_${Date.now()}` };
+                
+                // We use standard update logic but we hold the connection open
+                await db_access.updateUser(centralConn, id, newData);
+                await db_access.updateUser(partitionConn, id, newData);
+                
+                logs.push(`[${Date.now() - startTime}ms] WRITE executed (Data: ${newData.firstName}). Sleeping for ${sleepTime}s...`);
+            } else {
+                // READ
+                // We read from Central to demonstrate isolation effects
+                const rows = await db_access.findById(centralConn, id);
+                logs.push(`[${Date.now() - startTime}ms] READ executed. Value: ${rows ? rows.firstName : 'NULL'}. Sleeping for ${sleepTime}s...`);
+            }
+
+            // 5. SLEEP (Hold the locks/transaction open)
+            await sleep(sleepTime * 1000);
+
+            // 6. COMMIT
+            await centralConn.commit();
+            await partitionConn.commit();
+            logs.push(`[${Date.now() - startTime}ms] COMMIT Successful.`);
+
+            return {
+                success: true,
+                logs: logs,
+                finalStatus: "Committed"
+            };
+
+        } catch (error) {
+            logs.push(`[${Date.now() - startTime}ms] ERROR: ${error.message}`);
+            if (centralConn) await centralConn.rollback();
+            if (partitionConn) await partitionConn.rollback();
+            return {
+                success: false,
+                logs: logs,
+                error: error.message
+            };
         } finally {
             if (centralConn) centralConn.release();
             if (partitionConn) partitionConn.release();

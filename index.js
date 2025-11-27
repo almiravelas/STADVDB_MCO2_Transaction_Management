@@ -82,6 +82,17 @@ app.delete('/api/users/:id', async (req, res) => {
     }
 });
 
+// SIMULATION ENDPOINT
+app.post('/api/simulate', async (req, res) => {
+    try {
+        // req.body contains { id, type, isolation, sleepTime, updateText }
+        const result = await db_service.simulateTransaction(req.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ==========================================
 //  PART 2: DIAGNOSTIC & HEALTH ENDPOINTS
 // ==========================================

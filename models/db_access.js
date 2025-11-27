@@ -26,6 +26,11 @@ class db_access {
         );
     }
 
+    //Isolation levels: 'READ UNCOMMITTED', 'READ COMMITTED', 'REPEATABLE READ', 'SERIALIZABLE'
+    static async setIsolationLevel(connection, level) {
+        await connection.query(`SET SESSION TRANSACTION ISOLATION LEVEL ${level}`);
+    }
+
     // Dynamic Update
     static async updateUser(connection, id, data) {
         const keys = Object.keys(data);
@@ -39,7 +44,7 @@ class db_access {
         await connection.query(sql, values);
     }
 
-    // Dynamic Insert (THE FIX IS HERE)
+    // Dynamic Insert
     static async insertUser(connection, data) {
         const keys = Object.keys(data);
         const values = Object.values(data);
