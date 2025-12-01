@@ -195,77 +195,131 @@ class db_service {
     // CONCURRENCY SIMULATION
     // =========================================================
     static async simulateTransaction({ id, type, isolation, sleepTime, updateText }) {
-        // 1. Determine Nodes (We assume the user exists for simulation)
         const centralPool = db_router.getCentralNode();
-        
         let centralConn, partitionConn;
         let logs = [];
         const startTime = Date.now();
 
         try {
-            // Get user info first (outside the test transaction) to find the partition
-            let user = await this.getUserById(id); 
-            if(!user) throw new Error(`User ${id} not found for simulation.`);
-            const partitionPool = db_router.getPartitionNode(user.country);
-
             centralConn = await centralPool.getConnection();
+
+            // -----------------------------------------------------
+            // STEP 1: RESOLVE TARGET ID (User Input vs. Random)
+            // -----------------------------------------------------
+            let targetId = id; // Start with the input provided by the user
+
+            // If the ID is Missing (undefined/null/empty) OR explicitly 'random'
+            if (!targetId || targetId === 'random') {
+                logs.push(`[${Date.now() - startTime}ms] No specific ID provided. Selecting a RANDOM user...`);
+                
+                // Query to get one random ID
+                const [rows] = await centralConn.query('SELECT id FROM Users ORDER BY RAND() LIMIT 1');
+                
+                if (rows.length === 0) throw new Error("Database is empty. Cannot simulate.");
+                targetId = rows[0].id;
+                logs.push(`[${Date.now() - startTime}ms] Randomly selected User ID: ${targetId}`);
+            } else {
+                logs.push(`[${Date.now() - startTime}ms] User selected specific ID: ${targetId}`);
+            }
+
+            // -----------------------------------------------------
+            // STEP 2: VERIFY USER & DETERMINE PARTITION
+            // -----------------------------------------------------
+            // We use the central connection to check existence and get the country
+            const user = await db_access.findById(centralConn, targetId); 
+            
+            if(!user) {
+                throw new Error(`User with ID ${targetId} does not exist.`);
+            }
+
+            // Route to the correct partition based on the user's country
+            const partitionPool = db_router.getPartitionNode(user.country);
             partitionConn = await partitionPool.getConnection();
 
-            logs.push(`[${Date.now() - startTime}ms] Connections Acquired.`);
+            logs.push(`[${Date.now() - startTime}ms] Connections Acquired for User ${targetId} (${user.country}).`);
 
-            // 2. SET ISOLATION LEVEL
+            // -----------------------------------------------------
+            // STEP 3: CONFIGURE ISOLATION LEVELS
+            // -----------------------------------------------------
             await db_access.setIsolationLevel(centralConn, isolation);
             await db_access.setIsolationLevel(partitionConn, isolation);
             logs.push(`[${Date.now() - startTime}ms] Isolation set to ${isolation}`);
 
-            // 3. START TRANSACTION
+            // -----------------------------------------------------
+            // STEP 4: START TRANSACTION
+            // -----------------------------------------------------
             await centralConn.beginTransaction();
             await partitionConn.beginTransaction();
             logs.push(`[${Date.now() - startTime}ms] Transaction Started.`);
 
-            // 4. PERFORM ACTION
+            // -----------------------------------------------------
+            // STEP 5: PERFORM ACTION (READ or WRITE)
+            // -----------------------------------------------------
             if (type === 'WRITE') {
                 const newData = { firstName: updateText || `UPDATED_${Date.now()}` };
                 
-                // We use standard update logic but we hold the connection open
-                await db_access.updateUser(centralConn, id, newData);
-                await db_access.updateUser(partitionConn, id, newData);
+                // Perform update on both nodes
+                await db_access.updateUser(centralConn, targetId, newData);
+                await db_access.updateUser(partitionConn, targetId, newData);
                 
                 logs.push(`[${Date.now() - startTime}ms] WRITE executed (Data: ${newData.firstName}). Sleeping for ${sleepTime}s...`);
             } else {
                 // READ
-                // We read from Central to demonstrate isolation effects
-                const rows = await db_access.findById(centralConn, id);
-                logs.push(`[${Date.now() - startTime}ms] READ executed. Value: ${rows ? rows.firstName : 'NULL'}. Sleeping for ${sleepTime}s...`);
+                const result = await db_access.findById(centralConn, targetId);
+                
+                // 1. Handle Array vs Object
+                const userRow = Array.isArray(result) ? result[0] : result;
+                
+                // 2. Extract Name (using the correct lowercase 'firstname')
+                // We check 'firstname' (from DB) OR 'firstName' (just in case)
+                const nameVal = userRow ? (userRow.firstname || userRow.firstName || 'Unknown') : 'NULL';
+
+                logs.push(`[${Date.now() - startTime}ms] READ executed. Value: ${nameVal}. Sleeping for ${sleepTime}s...`);
             }
 
-            // 5. SLEEP (Hold the locks/transaction open)
+            // -----------------------------------------------------
+            // STEP 6: SLEEP (Simulate heavy load / hold locks)
+            // -----------------------------------------------------
             await sleep(sleepTime * 1000);
 
-            // 6. COMMIT
+            // -----------------------------------------------------
+            // STEP 7: COMMIT
+            // -----------------------------------------------------
             await centralConn.commit();
             await partitionConn.commit();
             logs.push(`[${Date.now() - startTime}ms] COMMIT Successful.`);
 
             return {
                 success: true,
+                targetId: targetId, // Return the ID used so the UI knows
                 logs: logs,
                 finalStatus: "Committed"
             };
 
         } catch (error) {
-            logs.push(`[${Date.now() - startTime}ms] ERROR: ${error.message}`);
-            if (centralConn) await centralConn.rollback();
-            if (partitionConn) await partitionConn.rollback();
+            // 1. Log the ORIGINAL error (This is what we need to see!)
+            logs.push(`[ERROR] Transaction Failed: ${error.message}`);
+            
+            // 2. Safe Rollback - Central
+            try {
+                if (centralConn) await centralConn.rollback();
+            } catch (rbError) {
+                logs.push(`[WARNING] Central Rollback failed (Connection likely dead): ${rbError.message}`);
+            }
+
+            // 3. Safe Rollback - Partition
+            try {
+                if (partitionConn) await partitionConn.rollback();
+            } catch (rbError) {
+                logs.push(`[WARNING] Partition Rollback failed: ${rbError.message}`);
+            }
+
             return {
                 success: false,
                 logs: logs,
                 error: error.message
             };
-        } finally {
-            if (centralConn) centralConn.release();
-            if (partitionConn) partitionConn.release();
-        }
+        }    
     }
 
     // =========================================================

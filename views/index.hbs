@@ -152,7 +152,7 @@
             </div>
         </section>
 
-        <!-- 2. CONCURRENCY LAB SECTION (MERGED) -->
+        <!-- 2. CONCURRENCY LAB SECTION -->
         <section id="concurrency-section" class="content-section">
             <div class="card-clean">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
@@ -161,11 +161,10 @@
                         <p style="color:#A3AED0; font-size:13px; margin:5px 0 0 0;">Test isolation levels and locking mechanisms</p>
                     </div>
                     <button class="btn-primary" onclick="createTestUser()">
-                        <i class='bx bx-user-plus'></i> Reset User 101
+                        <i class='bx bx-reset'></i> Reset User 101
                     </button>
                 </div>
 
-                <!-- Case Selectors -->
                 <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:15px; margin-bottom:25px;">
                     <div class="case-card" onclick="setCase(1)">
                         <h4>Case 1: Read-Read</h4>
@@ -181,20 +180,27 @@
                     </div>
                 </div>
 
-                <button class="btn-primary" onclick="runSimulation()" style="width:100%; justify-content:center; padding:15px; font-size:16px; background:#111;">
-                    <i class='bx bx-play'></i> RUN SIMULATION
-                </button>
+                <div style="background: #F4F7FE; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #E0E5F2;">
+                    <label style="margin-bottom: 8px;">Target User ID (Critical for Concurrency)</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="simGlobalId" class="input-field" placeholder="e.g. 101 (Leave EMPTY for Random User)" style="margin-bottom: 0;">
+                        <button class="btn-primary" onclick="runSimulation()" style="white-space: nowrap; background:#111;">
+                            <i class='bx bx-play'></i> RUN SIMULATION
+                        </button>
+                    </div>
+                    <p style="font-size: 11px; color: #A3AED0; margin: 5px 0 0 5px;">
+                        * If separate transactions target different users (Random), no locking will occur. 
+                        * To test locking, enter a specific ID (e.g., 101).
+                    </p>
+                </div>
 
-                <!-- Transaction Cards -->
                 <div class="sim-grid">
-                    <!-- Transaction A -->
                     <div style="background:#FAFAFA; padding:20px; border-radius:15px; border:1px solid #E0E5F2;">
                         <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
                             <h3 style="margin:0; font-size:16px;">Transaction A</h3>
                             <span class="badge badge-write" id="badgeA">WRITE</span>
                         </div>
                         <form id="formA">
-                            <input type="hidden" name="id" value="101">
                             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                                 <div>
                                     <label>Operation</label>
@@ -221,14 +227,12 @@
                         <div class="log-box" id="logA">Waiting to start...</div>
                     </div>
 
-                    <!-- Transaction B -->
                     <div style="background:#FAFAFA; padding:20px; border-radius:15px; border:1px solid #E0E5F2;">
                         <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
                             <h3 style="margin:0; font-size:16px;">Transaction B</h3>
                             <span class="badge badge-read" id="badgeB">READ</span>
                         </div>
                         <form id="formB">
-                            <input type="hidden" name="id" value="101">
                             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                                 <div>
                                     <label>Operation</label>
@@ -249,7 +253,11 @@
                                 <option value="REPEATABLE READ">REPEATABLE READ</option>
                                 <option value="SERIALIZABLE">SERIALIZABLE</option>
                             </select>
-                            <div class="log-box" id="logB" style="margin-top:82px;">Waiting to start...</div>
+                            
+                            <label>Update Text (If Write)</label>
+                            <input type="text" name="updateText" class="input-field" value="Trans_B_Data">
+
+                            <div class="log-box" id="logB" style="margin-top:15px;">Waiting to start...</div>
                         </form>
                     </div>
                 </div>
@@ -577,32 +585,59 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.runSimulation = async () => {
+        // 1. Get the Global ID (or empty for random)
+        const targetId = document.getElementById('simGlobalId').value.trim();
+        
+        // 2. Get Form Data
         const formA = new FormData(document.getElementById('formA'));
         const formB = new FormData(document.getElementById('formB'));
-        const dataA = Object.fromEntries(formA.entries());
-        const dataB = Object.fromEntries(formB.entries());
+        
+        // 3. Construct Payload with the Shared ID
+        const dataA = { ...Object.fromEntries(formA.entries()), id: targetId };
+        const dataB = { ...Object.fromEntries(formB.entries()), id: targetId };
 
+        // UI Feedback
         document.getElementById('logA').innerHTML = ">> Transaction Started...";
         document.getElementById('logB').innerHTML = ">> Waiting 1s delay...";
+        
+        // Helper function to safely render logs
+        const renderLogs = (elementId, data, error) => {
+            const el = document.getElementById(elementId);
+            if (error) {
+                el.innerHTML = `<span style="color:red"><b>Frontend Error:</b> ${error}</span>`;
+                return;
+            }
+            
+            // SAFETY CHECK: Ensure logs exist and is an array
+            const logContent = (data.logs && Array.isArray(data.logs)) 
+                ? data.logs.join('<br>') 
+                : `<span style="color:orange">Warning: No logs returned. (Backend may have crashed or returned: ${JSON.stringify(data)})</span>`;
 
-        // Start A
+            const idMsg = data.targetId ? `[ID: ${data.targetId}] ` : "";
+            el.innerHTML = `<b>${idMsg}</b><br>` + logContent;
+        };
+
+        // 4. Execute Transaction A
         const pA = fetch('/api/simulate', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(dataA)
-        }).then(r => r.json()).then(d => {
-            document.getElementById('logA').innerHTML = d.logs.join('<br>');
-        });
+        })
+        .then(r => r.json())
+        .then(d => renderLogs('logA', d))
+        .catch(e => renderLogs('logA', null, e.message));
 
-        // Start B (Delayed)
+        // 5. Execute Transaction B (Delayed)
         await new Promise(r => setTimeout(r, 1000));
+        
         const pB = fetch('/api/simulate', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(dataB)
-        }).then(r => r.json()).then(d => {
-            document.getElementById('logB').innerHTML = d.logs.join('<br>');
-        });
+        })
+        .then(r => r.json())
+        .then(d => renderLogs('logB', d))
+        .catch(e => renderLogs('logB', null, e.message));
 
         await Promise.all([pA, pB]);
     };

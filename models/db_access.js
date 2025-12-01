@@ -3,7 +3,7 @@ class db_access {
     // Find by ID
     static async findById(connection, id) {
         const [rows] = await connection.execute(
-            'SELECT * FROM Users WHERE id = ?', 
+            'SELECT * FROM users WHERE id = ?', 
             [id]
         );
         return rows[0];
@@ -12,7 +12,7 @@ class db_access {
     // Find by Country
     static async findByCountry(connection, country) {
         const [rows] = await connection.execute(
-            'SELECT * FROM Users WHERE country = ? LIMIT 50', 
+            'SELECT * FROM users WHERE country = ? LIMIT 50', 
             [country]
         );
         return rows;
@@ -21,7 +21,7 @@ class db_access {
     // Lock Row
     static async lockRow(connection, id) {
         await connection.query(
-            'SELECT id FROM Users WHERE id = ? FOR UPDATE', 
+            'SELECT id FROM users WHERE id = ? FOR UPDATE', 
             [id]
         );
     }
@@ -40,7 +40,7 @@ class db_access {
         const values = Object.values(data);
         values.push(id); 
 
-        const sql = `UPDATE Users SET ${setClause} WHERE id = ?`;
+        const sql = `UPDATE users SET ${setClause} WHERE id = ?`;
         await connection.query(sql, values);
     }
 
@@ -53,7 +53,7 @@ class db_access {
         const placeholders = keys.map(() => '?').join(', ');
 
         // Create the SQL: INSERT INTO Users (id, name, createdAt) VALUES (?, ?, ?)
-        const sql = `INSERT INTO Users (${keys.join(', ')}) VALUES (${placeholders})`;
+        const sql = `INSERT INTO users (${keys.join(', ')}) VALUES (${placeholders})`;
         
         // DEBUGGING: Print the SQL to the console to verify 'createdAt' is there
         console.log("EXECUTING SQL:", sql);
@@ -65,7 +65,7 @@ class db_access {
 
     // Delete
     static async deleteUser(connection, id) {
-        await connection.query('DELETE FROM Users WHERE id = ?', [id]);
+        await connection.query('DELETE FROM users WHERE id = ?', [id]);
     }
 }
 
