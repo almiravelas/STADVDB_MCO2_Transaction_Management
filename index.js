@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static('public', { index: false }));
+app.use(express.static(path.join(__dirname, "public")));
 
 // View engine (Handlebars)
 app.engine('hbs', exphbs.engine({
@@ -367,6 +368,10 @@ app.get('/api/compare', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+//RECOVERY
+app.use("/replication", require('./routes/db_cases'));
+app.use("/failure", require('./routes/failureRoutes'));
 
 app.listen(PORT, () => {
   console.log(`\nServer running on http://localhost:${PORT}`);

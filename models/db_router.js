@@ -26,6 +26,13 @@ class db_router {
     static getCentralNode() {
         return db.node0;
     }
+
+    static getNodeById(id) {
+        if (id == 0) return db.node0;
+        if (id == 1) return db.node1;
+        if (id == 2) return db.node2;
+        throw new Error("Invalid node ID");
+    }
 }
 
 module.exports = db_router;

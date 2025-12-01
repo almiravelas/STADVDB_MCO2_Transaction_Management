@@ -268,22 +268,54 @@
                 <div class="card-clean" style="text-align:center;">
                     <h3>Node 1</h3>
                     <p id="node1-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
-                    <button class="btn-primary" onclick="toggleNode(1)"><i class='bx bx-power-off'></i> Toggle</button>
+                    <button class="btn-primary" onclick="toggleNode(0, this)"><i class='bx bx-power-off'></i> Toggle</button>
                 </div>
 
                 <!-- Node 2 -->
                 <div class="card-clean" style="text-align:center;">
                     <h3>Node 2</h3>
                     <p id="node2-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
-                    <button class="btn-primary" onclick="toggleNode(2)"><i class='bx bx-power-off'></i> Toggle</button>
+                    <button class="btn-primary" onclick="toggleNode(1, this)"><i class='bx bx-power-off'></i> Toggle</button>
                 </div>
 
                 <!-- Node 3 -->
                 <div class="card-clean" style="text-align:center;">
                     <h3>Node 3</h3>
-                    <p id="node3-status" style="font-size:14px; color:#34B53A;">ONLINE</p><button class="btn-primary" onclick="toggleNode(3)"><i class='bx bx-power-off'></i> Toggle</button>
+                    <p id="node3-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <button class="btn-primary" onclick="toggleNode(2, this)"><i class='bx bx-power-off'></i> Toggle</button>
                 </div>
-        </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-top:20px;">
+            
+                <!-- Case 1 -->
+                <div class="card-clean" style="text-align:center;">
+                    <h3>Case 1</h3>
+                    <p id="node1-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <button class="btn-primary" onclick="runCase1()"><i class='bx bx-power-off'></i> Run</button>
+                </div>
+
+                <!-- Case 2 -->
+                <div class="card-clean" style="text-align:center;">
+                    <h3>Case 2</h3>
+                    <p id="node2-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <button class="btn-primary" onclick="runCase2()"><i class='bx bx-power-off'></i> Run</button>
+                </div>
+
+                <!-- Case 3 -->
+                <div class="card-clean" style="text-align:center;">
+                    <h3>Case 3</h3>
+                    <p id="node3-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <button class="btn-primary" onclick="runCase3()"><i class='bx bx-power-off'></i> Run</button>
+                </div>
+
+                <!-- Case 4 -->
+                <div class="card-clean" style="text-align:center;">
+                    <h3>Case 4</h3>
+                    <p id="node3-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <button class="btn-primary" onclick="runCase4()"><i class='bx bx-power-off'></i> Run</button>
+                </div>
+            </div>
 
         <h3 style="margin-top:30px;">Event Log</h3>
         <div class="log-box" id="failureLog">System idle...</div>
@@ -717,5 +749,6 @@ document.addEventListener('DOMContentLoaded', () => {
     updateStats();
 });
 </script>
+<script src="/failure.js"></script>
 </body>
 </html>
