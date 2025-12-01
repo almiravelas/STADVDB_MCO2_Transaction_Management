@@ -47,6 +47,7 @@ app.post('/api/users', async (req, res) => {
 // 2. GET USER (By ID or Country)
 app.get('/api/users/search', async (req, res) => {
     const { id, country } = req.query;
+    console.log(`[API] Search Request - ID: ${id}, Country: ${country}`);
     try {
         if (id) {
             // Strategy 1: Central Lookup
@@ -56,11 +57,13 @@ app.get('/api/users/search', async (req, res) => {
         } else if (country) {
             // Strategy 2: Partition Lookup
             const users = await db_service.getUsersByCountry(country);
+            console.log(`[API] Found ${users.length} users for country ${country}`);
             res.json(users);
         } else {
             res.status(400).json({ error: "Please provide 'id' or 'country'" });
         }
     } catch (error) {
+        console.error("[API] Search Error:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -95,6 +98,8 @@ app.post('/api/simulate', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+
 
 // ==========================================
 //  PART 2: DIAGNOSTIC & HEALTH ENDPOINTS
@@ -233,8 +238,11 @@ app.get('/api/node/:id', async (req, res) => {
 // Get sample data from a specific node
 app.get('/api/node/:id/data', async (req, res) => {
   const nodeId = parseInt(req.params.id);
-  const limit = parseInt(req.query.limit) || 5;
+  const limit = parseInt(req.query.limit) || 10;
+  const offset = parseInt(req.query.offset) || 0;
   
+  console.log(`[API] Fetching data for Node ${nodeId} | Limit: ${limit} | Offset: ${offset}`);
+
   const nodeMap = {
     1: { pool: node0, name: 'Node 1 (Central)' },
     2: { pool: node1, name: 'Node 2 (Partition 1)' },
@@ -254,9 +262,17 @@ app.get('/api/node/:id/data', async (req, res) => {
       return res.json({ node: nodeId, message: 'No tables found', data: [] });
     }
     
-    const [data] = await pool.query(`SELECT * FROM ${tableName} LIMIT ?`, [limit]);
+    // Debugging SQL
+    // Added ORDER BY id to ensure deterministic pagination
+    const sql = `SELECT * FROM ${tableName} ORDER BY id LIMIT ${limit} OFFSET ${offset}`;
+    console.log(`[API] Executing SQL: ${sql}`);
+    
+    // Using interpolation for LIMIT/OFFSET to avoid prepared statement issues with some MySQL versions/drivers
+    const [data] = await pool.query(sql);
     const [count] = await pool.query(`SELECT COUNT(*) as count FROM ${tableName}`);
     
+    console.log(`[API] Found ${data.length} rows. Total: ${count[0].count}`);
+
     res.json({
       node: nodeId,
       name: nodeMap[nodeId].name,
@@ -266,6 +282,7 @@ app.get('/api/node/:id/data', async (req, res) => {
       data: data
     });
   } catch (error) {
+    console.error("[API] Error fetching data:", error);
     res.status(500).json({ node: nodeId, error: error.message });
   }
 });
@@ -369,6 +386,12 @@ app.get('/api/compare', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// TEST COMPLETE FLOW
+app.get('/api/test-complete-flow', async (req, res) => {
+    const result = await db_service.testCompleteFlow();
+    res.json(result);
 });
 
 //RECOVERY

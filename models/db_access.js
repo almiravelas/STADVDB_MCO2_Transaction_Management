@@ -11,10 +11,9 @@ class db_access {
 
     // Find by Country
     static async findByCountry(connection, country) {
-        const [rows] = await connection.execute(
-            'SELECT * FROM users WHERE country = ? LIMIT 50', 
-            [country]
-        );
+        const query = 'SELECT * FROM users WHERE country LIKE ? LIMIT 50';
+        console.log(`[DB Access] Executing: ${query} with param [${country}]`);
+        const [rows] = await connection.execute(query, [country]);
         return rows;
     }
 

@@ -1,5 +1,14 @@
 document.addEventListener('DOMContentLoaded', () => {
 
+    // Helper to handle case-insensitive property names
+    const getVal = (obj, ...keys) => {
+        if (!obj) return 'undefined';
+        for (const k of keys) {
+            if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+        }
+        return 'undefined';
+    };
+
     // 1. SIDEBAR TOGGLE
     const sidebar = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('sidebarToggle');
@@ -223,32 +232,81 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // Pagination State
+    let currentPage = 1;
+    const pageSize = 10;
+
     window.loadAllData = async () => {
         const tbody = document.getElementById('allDataTableBody');
+        const btnPrev = document.getElementById('btnPrevPage');
+        const btnNext = document.getElementById('btnNextPage');
+        const pageInfo = document.getElementById('pageInfo');
+
         tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
         try {
-            const res = await fetch('/api/node/1/data?limit=50');
+            const offset = (currentPage - 1) * pageSize;
+            // Added timestamp to prevent caching
+            const res = await fetch(`/api/node/1/data?limit=${pageSize}&offset=${offset}&_t=${new Date().getTime()}`);
             const json = await res.json();
             tbody.innerHTML = '';
-            if(json.data) {
+            
+            if(json.data && json.data.length > 0) {
                 json.data.forEach(u => {
+                    const fName = getVal(u, 'firstName', 'firstname', 'first_name', 'FirstName');
+                    const lName = getVal(u, 'lastName', 'lastname', 'last_name', 'LastName');
+                    const uId = getVal(u, 'id', 'ID', 'Id');
+                    const uUsername = getVal(u, 'username', 'Username');
+                    const uCountry = getVal(u, 'country', 'Country');
+                    const uCity = getVal(u, 'city', 'City');
+
                     tbody.innerHTML += `
                     <tr>
-                        <td style="padding:15px;">${u.id}</td>
-                        <td>${u.username}</td>
-                        <td>${u.firstName} ${u.lastName}</td>
-                        <td>${u.country}</td>
+                        <td style="padding:15px;">${uId}</td>
+                        <td>${uUsername}</td>
+                        <td>${fName} ${lName}</td>
+                        <td>${uCountry}</td>
                         <td style="text-align:right;">
                             <div style="display:flex; justify-content:flex-end; gap:5px;">
-                                <button class="btn-soft btn-soft-blue" onclick="editUser('${u.id}','${u.firstName}','${u.lastName}','${u.username}','${u.city}','${u.country}')"><i class='bx bx-edit-alt'></i></button>
-                                <button class="btn-soft btn-soft-red" onclick="deleteUser('${u.id}','${u.firstName}')"><i class='bx bx-trash'></i></button>
+                                <button class="btn-soft btn-soft-blue" onclick="editUser('${uId}','${fName}','${lName}','${uUsername}','${uCity}','${uCountry}')"><i class='bx bx-edit-alt'></i></button>
+                                <button class="btn-soft btn-soft-red" onclick="deleteUser('${uId}','${fName}')"><i class='bx bx-trash'></i></button>
                             </div>
                         </td>
                     </tr>`;
                 });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">No more records found</td></tr>';
             }
-        } catch(e) { tbody.innerHTML = '<tr><td colspan="5">Error loading data</td></tr>'; }
+
+            // Update Pagination UI
+            if(pageInfo) pageInfo.innerText = `Page ${currentPage}`;
+            if(btnPrev) btnPrev.disabled = currentPage === 1;
+            if(btnNext) btnNext.disabled = (!json.data || json.data.length < pageSize);
+
+        } catch(e) { 
+            console.error(e);
+            tbody.innerHTML = '<tr><td colspan="5">Error loading data</td></tr>'; 
+        }
     };
+
+    // Pagination Event Listeners
+    const btnPrev = document.getElementById('btnPrevPage');
+    const btnNext = document.getElementById('btnNextPage');
+    
+    if(btnPrev) {
+        btnPrev.addEventListener('click', () => {
+            if(currentPage > 1) {
+                currentPage--;
+                loadAllData();
+            }
+        });
+    }
+    
+    if(btnNext) {
+        btnNext.addEventListener('click', () => {
+            currentPage++;
+            loadAllData();
+        });
+    }
 
     window.updateStats = async () => {
         try {
@@ -303,4 +361,95 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     renderHistory();
     updateStats();
+
+    // 7. SEARCH FUNCTIONALITY
+    const searchForm = document.getElementById('searchForm');
+    if (searchForm) {
+        searchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('searchId').value.trim();
+            const resultDiv = document.getElementById('searchResult');
+            
+            if (!id) return;
+
+            try {
+                const res = await fetch(`/api/users/search?id=${id}`);
+                if (!res.ok) throw new Error('User not found');
+                const user = await res.json();
+                console.log("Search Result:", user); 
+
+                const firstName = getVal(user, 'firstName', 'firstname', 'first_name', 'FirstName', 'FIRST_NAME');
+                const lastName = getVal(user, 'lastName', 'lastname', 'last_name', 'LastName', 'LAST_NAME');
+                const city = getVal(user, 'city', 'City', 'CITY');
+                const country = getVal(user, 'country', 'Country', 'COUNTRY');
+                const userId = getVal(user, 'id', 'ID', 'Id', 'user_id', 'User_Id');
+                const username = getVal(user, 'username', 'Username', 'USERNAME');
+
+                document.getElementById('resultName').innerText = `${firstName} ${lastName}`;
+                document.getElementById('resultId').innerText = userId;
+                document.getElementById('resultCity').innerText = `${city}, ${country}`;
+                
+                document.getElementById('btnEditSearch').onclick = () => 
+                    window.editUser(userId, firstName, lastName, username, city, country);
+                
+                document.getElementById('btnDeleteSearch').onclick = () => 
+                    window.deleteUser(userId, firstName);
+
+                resultDiv.style.display = 'block';
+            } catch (err) {
+                alert(err.message);
+                resultDiv.style.display = 'none';
+            }
+        });
+    }
+
+    // 8. FILTER BY COUNTRY
+    const countryForm = document.getElementById('countryForm');
+    if (countryForm) {
+        countryForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const country = document.getElementById('countrySelect').value;
+            const listDiv = document.getElementById('usersList');
+            const container = document.getElementById('usersContainer');
+
+            if (!country) return;
+
+            try {
+                const res = await fetch(`/api/users/search?country=${country}`);
+                const users = await res.json();
+                console.log("Filter Result:", users);
+
+                container.innerHTML = '';
+                
+                if (!Array.isArray(users)) {
+                    console.error("Expected array but got:", users);
+                    container.innerHTML = '<p style="color:red">Error: Invalid response format</p>';
+                    listDiv.style.display = 'block';
+                    return;
+                }
+
+                if (users.length === 0) {
+                    container.innerHTML = '<p>No users found in this location.</p>';
+                } else {
+                    users.forEach(u => {
+                        const fName = getVal(u, 'firstName', 'firstname', 'first_name', 'FirstName', 'FIRST_NAME');
+                        const lName = getVal(u, 'lastName', 'lastname', 'last_name', 'LastName', 'LAST_NAME');
+                        const uId = getVal(u, 'id', 'ID', 'Id', 'user_id', 'User_Id');
+                        const uCity = getVal(u, 'city', 'City', 'CITY');
+
+                        container.innerHTML += `
+                        <div style="background:#fff; padding:15px; border-radius:10px; border:1px solid #eee;">
+                            <h4 style="margin:0 0 5px 0;">${fName} ${lName}</h4>
+                            <p style="margin:0; font-size:12px; color:#888;">ID: ${uId}</p>
+                            <p style="margin:0; font-size:12px; color:#888;">${uCity}</p>
+                        </div>`;
+                    });
+                }
+                listDiv.style.display = 'block';
+            } catch (err) {
+                console.error(err);
+                alert("Error fetching data: " + err.message);
+            }
+        });
+    }
 });
