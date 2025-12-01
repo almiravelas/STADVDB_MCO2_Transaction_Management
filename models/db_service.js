@@ -268,6 +268,9 @@ class db_service {
         }
     }
 
+    // =========================================================
+    // FAILURE RECOVERY SIMULATION
+    // =========================================================
     static async testCase1(NODE_STATE) {
         let logs = [];
         const partitionNode = NODE_STATE[1] ? 1 : 2;
