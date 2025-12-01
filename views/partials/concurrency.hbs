@@ -1,0 +1,111 @@
+        <!-- 2. CONCURRENCY LAB SECTION -->
+        <section id="concurrency-section" class="content-section">
+            <div class="card-clean">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div>
+                        <h2 style="margin:0;">Simulation Control</h2>
+                        <p style="color:#A3AED0; font-size:13px; margin:5px 0 0 0;">Test isolation levels and locking mechanisms</p>
+                    </div>
+                    <button class="btn-primary" onclick="createTestUser()">
+                        <i class='bx bx-reset'></i> Reset User 101
+                    </button>
+                </div>
+
+                <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:15px; margin-bottom:25px;">
+                    <div class="case-card" onclick="setCase(1)">
+                        <h4>Case 1: Read-Read</h4>
+                        <p>No blocking expected</p>
+                    </div>
+                    <div class="case-card" onclick="setCase(2)">
+                        <h4>Case 2: Write-Read</h4>
+                        <p>Tests Isolation Levels</p>
+                    </div>
+                    <div class="case-card" onclick="setCase(3)">
+                        <h4>Case 3: Write-Write</h4>
+                        <p>Tests Row Locking</p>
+                    </div>
+                </div>
+
+                <div style="background: #F4F7FE; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #E0E5F2;">
+                    <label style="margin-bottom: 8px;">Target User ID (Critical for Concurrency)</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="simGlobalId" class="input-field" placeholder="e.g. 101 (Leave EMPTY for Random User)" style="margin-bottom: 0;">
+                        <button class="btn-primary" onclick="runSimulation()" style="white-space: nowrap; background:#111;">
+                            <i class='bx bx-play'></i> RUN SIMULATION
+                        </button>
+                    </div>
+                    <p style="font-size: 11px; color: #A3AED0; margin: 5px 0 0 5px;">
+                        * If separate transactions target different users (Random), no locking will occur. 
+                        * To test locking, enter a specific ID (e.g., 101).
+                    </p>
+                </div>
+
+                <div class="sim-grid">
+                    <div style="background:#FAFAFA; padding:20px; border-radius:15px; border:1px solid #E0E5F2;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                            <h3 style="margin:0; font-size:16px;">Transaction A</h3>
+                            <span class="badge badge-write" id="badgeA">WRITE</span>
+                        </div>
+                        <form id="formA">
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                <div>
+                                    <label>Operation</label>
+                                    <select name="type" class="input-field" onchange="updateBadge('A', this.value)">
+                                        <option value="WRITE">WRITE (Update)</option>
+                                        <option value="READ">READ</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label>Duration (s)</label>
+                                    <input type="number" name="sleepTime" class="input-field" value="5">
+                                </div>
+                            </div>
+                            <label>Isolation Level</label>
+                            <select name="isolation" class="input-field">
+                                <option value="READ UNCOMMITTED">READ UNCOMMITTED</option>
+                                <option value="READ COMMITTED">READ COMMITTED</option>
+                                <option value="REPEATABLE READ">REPEATABLE READ</option>
+                                <option value="SERIALIZABLE">SERIALIZABLE</option>
+                            </select>
+                            <label>Update Text (If Write)</label>
+                            <input type="text" name="updateText" class="input-field" value="Trans_A_Data">
+                        </form>
+                        <div class="log-box" id="logA">Waiting to start...</div>
+                    </div>
+
+                    <div style="background:#FAFAFA; padding:20px; border-radius:15px; border:1px solid #E0E5F2;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                            <h3 style="margin:0; font-size:16px;">Transaction B</h3>
+                            <span class="badge badge-read" id="badgeB">READ</span>
+                        </div>
+                        <form id="formB">
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                <div>
+                                    <label>Operation</label>
+                                    <select name="type" class="input-field" onchange="updateBadge('B', this.value)">
+                                        <option value="READ">READ</option>
+                                        <option value="WRITE">WRITE (Update)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label>Duration (s)</label>
+                                    <input type="number" name="sleepTime" class="input-field" value="1">
+                                </div>
+                            </div>
+                            <label>Isolation Level</label>
+                            <select name="isolation" class="input-field">
+                                <option value="READ UNCOMMITTED">READ UNCOMMITTED</option>
+                                <option value="READ COMMITTED">READ COMMITTED</option>
+                                <option value="REPEATABLE READ">REPEATABLE READ</option>
+                                <option value="SERIALIZABLE">SERIALIZABLE</option>
+                            </select>
+                            
+                            <label>Update Text (If Write)</label>
+                            <input type="text" name="updateText" class="input-field" value="Trans_B_Data">
+
+                            <div class="log-box" id="logB" style="margin-top:15px;">Waiting to start...</div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>

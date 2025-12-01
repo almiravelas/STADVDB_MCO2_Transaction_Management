@@ -1,14 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>STADVDB MCO2 - Node Testing</title>
-    <link rel="stylesheet" href="/index.css">
-  </head>
-  <body>
-    <div class="container">
-      {{{body}}}
-    </div>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB Manager</title>
+    <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    {{> sidebar}}
+    
+    <main class="main-content">
+        <header class="header">
+            <div>
+                <p style="font-size:12px; color:#A3AED0; margin:0;">Pages / <span id="breadcrumb">Dashboard</span></p>
+                <h1 id="pageTitle" style="margin:5px 0 0 0; font-size:28px;">Main Dashboard</h1>
+            </div>
+            <button class="btn-primary" id="btnAddUser"><i class='bx bx-plus'></i><span>Add User</span></button>
+        </header>
+
+        {{{body}}}
+    </main>
+
+    {{> modal}}
+
+    <script src="/js/main.js"></script>
+    <script src="/failure.js"></script>
+</body>
 </html>
