@@ -321,8 +321,8 @@ class db_service {
         
         // Manually add a missed write to queue
         db_service.missedWrites[1].push({
-            query: "INSERT INTO Users (username, firstName, lastName, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            params: ['recovery_test', 'Recovery', 'Test', 'TestCity', 'USA', timestamp, timestamp],
+            query: "INSERT INTO users (firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)",
+            params: ['Recovery', 'Test', 'TestCity', 'USA', timestamp, timestamp],
             originalTimestamp: timestamp,
             attemptCount: 0,
             lastError: null
@@ -339,8 +339,8 @@ class db_service {
         // Test adding a write
         const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
         db_service.missedWrites[1].push({
-            query: "INSERT INTO Users (username, firstName, lastName, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            params: ['test_user', 'Test', 'User', 'TestCity', 'USA', timestamp, timestamp],
+            query: "INSERT INTO users (firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)",
+            params: ['Test', 'User', 'TestCity', 'USA', timestamp, timestamp],
             originalTimestamp: timestamp,
             attemptCount: 0,
             lastError: 'Connection timeout'
@@ -418,7 +418,7 @@ class db_service {
 
             // 2. AUTO-INCREMENT LOGIC: Get Max ID from Central
             const [rows] = await centralConn.query(
-                'SELECT id FROM Users ORDER BY id DESC LIMIT 1 FOR UPDATE'
+                'SELECT id FROM users ORDER BY id DESC LIMIT 1 FOR UPDATE'
             );
             const lastId = rows.length ? rows[0].id : 0;
             const newId = parseInt(lastId) + 1; // Ensure it's an integer
@@ -427,18 +427,11 @@ class db_service {
             const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
             
             const fullData = {
-                id: newId, // <--- Explicitly setting the generated ID
-                username: userData.username || `user_${newId}`,
-                firstName: userData.firstName,
-                lastName: userData.lastName,
+                id: newId, 
+                firstname: userData.firstName,
+                lastname: userData.lastName,
                 city: userData.city,
                 country: userData.country,
-                gender: userData.gender || 'Unknown',
-                address1: 'N/A',
-                address2: 'N/A',
-                zipCode: '0000',
-                phoneNumber: '000-000-0000',
-                dateOfBirth: '2000-01-01',
                 createdAt: timestamp,
                 updatedAt: timestamp
             };
@@ -477,6 +470,18 @@ class db_service {
     // UPDATE
     // ---------------------------------------------------
     static async updateUser(id, newData) {
+        // Sanitize data to match 'users' table schema
+        const sanitizedData = {};
+        if (newData.firstName) sanitizedData.firstname = newData.firstName;
+        if (newData.lastName) sanitizedData.lastname = newData.lastName;
+        if (newData.city) sanitizedData.city = newData.city;
+        if (newData.country) sanitizedData.country = newData.country;
+        
+        // If sanitizedData is empty, nothing to update
+        if (Object.keys(sanitizedData).length === 0) {
+             return { success: true, message: "No valid fields to update." };
+        }
+
         const centralPool = db_router.getCentralNode();
         let centralConn, partitionConn;
 
@@ -493,8 +498,8 @@ class db_service {
 
             await db_access.lockRow(centralConn, id);
             
-            await db_access.updateUser(centralConn, id, newData);
-            await db_access.updateUser(partitionConn, id, newData);
+            await db_access.updateUser(centralConn, id, sanitizedData);
+            await db_access.updateUser(partitionConn, id, sanitizedData);
 
             await centralConn.commit();
             await partitionConn.commit();
@@ -513,7 +518,8 @@ class db_service {
     // ---------------------------------------------------
     // DELETE
     // ---------------------------------------------------
-    static async deleteUser(id) {
+    static async deleteUser(id, countryHint = null) {
+        console.log(`[DB Service] Attempting to delete user ${id}. Hint: ${countryHint}`);
         const centralPool = db_router.getCentralNode();
         let centralConn, partitionConn;
 
@@ -521,23 +527,46 @@ class db_service {
             centralConn = await centralPool.getConnection();
             await centralConn.beginTransaction();
 
-            const user = await db_access.findById(centralConn, id);
-            if (!user) throw new Error(`User with ID ${id} not found.`);
+            let user = await db_access.findById(centralConn, id);
+            let targetCountry = countryHint;
 
-            const partitionPool = db_router.getPartitionNode(user.country);
+            if (!user) {
+                console.warn(`[DB Service] User ${id} not found in Central Node.`);
+                if (!countryHint) {
+                    throw new Error(`User with ID ${id} not found in Central Node and no country hint provided.`);
+                }
+                console.log(`[DB Service] Using country hint '${countryHint}' to attempt partition cleanup.`);
+            } else {
+                console.log(`[DB Service] User found in Central: ${user.username}, Country: ${user.country}`);
+                targetCountry = user.country;
+            }
+
+            const partitionPool = db_router.getPartitionNode(targetCountry);
             partitionConn = await partitionPool.getConnection();
             await partitionConn.beginTransaction();
 
-            await db_access.lockRow(centralConn, id);
+            // Always attempt to delete from Central, even if findById failed.
+            // This handles cases where the record exists but findById missed it (e.g. type mismatch)
+            // or if we are cleaning up a ghost record.
+            if (user) {
+                await db_access.lockRow(centralConn, id);
+            }
             
-            await db_access.deleteUser(centralConn, id);
-            await db_access.deleteUser(partitionConn, id);
+            console.log(`[DB Service] Deleting from Central...`);
+            const centralResult = await db_access.deleteUser(centralConn, id);
+            console.log(`[DB Service] Central Delete Result: Affected Rows = ${centralResult.affectedRows}`);
+            
+            console.log(`[DB Service] Deleting from Partition (${targetCountry})...`);
+            const partitionResult = await db_access.deleteUser(partitionConn, id);
+            console.log(`[DB Service] Partition Delete Result: Affected Rows = ${partitionResult.affectedRows}`);
 
             await centralConn.commit();
             await partitionConn.commit();
+            console.log(`[DB Service] Delete successful.`);
 
             return { success: true, message: "User deleted." };
         } catch (error) {
+            console.error(`[DB Service] Delete failed:`, error);
             if (centralConn) await centralConn.rollback();
             if (partitionConn) await partitionConn.rollback();
             throw error;
@@ -569,7 +598,7 @@ class db_service {
                 logs.push(`[${Date.now() - startTime}ms] No specific ID provided. Selecting a RANDOM user...`);
                 
                 // Query to get one random ID
-                const [rows] = await centralConn.query('SELECT id FROM Users ORDER BY RAND() LIMIT 1');
+                const [rows] = await centralConn.query('SELECT id FROM users ORDER BY RAND() LIMIT 1');
                 
                 if (rows.length === 0) throw new Error("Database is empty. Cannot simulate.");
                 targetId = rows[0].id;
@@ -612,13 +641,13 @@ class db_service {
             // STEP 5: PERFORM ACTION (READ or WRITE)
             // -----------------------------------------------------
             if (type === 'WRITE') {
-                const newData = { firstName: updateText || `UPDATED_${Date.now()}` };
+                const newData = { firstname: updateText || `UPDATED_${Date.now()}` };
                 
                 // Perform update on both nodes
                 await db_access.updateUser(centralConn, targetId, newData);
                 await db_access.updateUser(partitionConn, targetId, newData);
                 
-                logs.push(`[${Date.now() - startTime}ms] WRITE executed (Data: ${newData.firstName}). Sleeping for ${sleepTime}s...`);
+                logs.push(`[${Date.now() - startTime}ms] WRITE executed (Data: ${newData.firstname}). Sleeping for ${sleepTime}s...`);
             } else {
                 // READ
                 const result = await db_access.findById(centralConn, targetId);
@@ -707,7 +736,7 @@ class db_service {
             await pConn.beginTransaction();
             logs.push(`Writing to Partition ${partitionNode}...`);
             await pConn.query(
-                "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_user', 'case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())"
+                "INSERT INTO users (firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())"
             );
             await pConn.commit();
             logs.push(`Partition ${partitionNode} write SUCCESS.`);
@@ -715,7 +744,7 @@ class db_service {
             if (!NODE_STATE[0]) {
                 logs.push("CENTRAL is OFFLINE — replication FAILED. Added to missedWrites queue.");
                 db_service.missedWrites[0].push({
-                    query: "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_user', 'case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())",
+                    query: "INSERT INTO users (firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())",
                 });
                 return { success: true, logs };
             }
@@ -723,7 +752,7 @@ class db_service {
             const cPool = db_router.getNodeById(0);
             const cConn = await cPool.getConnection();
             await cConn.query(
-                "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_user', 'case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())"
+                "INSERT INTO users (firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())"
             );
             cConn.release();
             logs.push("Replication to CENTRAL succeeded.");
@@ -780,87 +809,7 @@ class db_service {
 
 
 
-    // =========================================================
-    // FAILURE RECOVERY SIMULATION
-    // =========================================================
-    static async testCase1(NODE_STATE) {
-        let logs = [];
-        const partitionNode = NODE_STATE[1] ? 1 : 2;
-        const pPool = db_router.getNodeById(partitionNode);
 
-        if (!NODE_STATE[partitionNode]) {
-            logs.push(`Partition ${partitionNode} is OFFLINE — cannot write.`);
-            return { success: false, logs };
-        }
-
-        const pConn = await pPool.getConnection();
-        try {
-            await pConn.beginTransaction();
-            logs.push(`Writing to Partition ${partitionNode}...`);
-            await pConn.query(
-                "INSERT INTO Users (username, country) VALUES ('case1_user','USA')"
-            );
-            await pConn.commit();
-            logs.push(`Partition ${partitionNode} write SUCCESS.`);
-
-            if (!NODE_STATE[0]) {
-                logs.push("CENTRAL is OFFLINE — replication FAILED. Added to missedWrites queue.");
-                db_service.missedWrites[0].push({
-                    query: "INSERT INTO Users (username, country) VALUES ('case1_user','USA')",
-                });
-                return { success: true, logs };
-            }
-
-            const cPool = db_router.getNodeById(0);
-            const cConn = await cPool.getConnection();
-            await cConn.query(
-                "INSERT INTO Users (username, country) VALUES ('case1_user','USA')"
-            );
-            cConn.release();
-            logs.push("Replication to CENTRAL succeeded.");
-            return { success: true, logs };
-        } catch (err) {
-            logs.push(err.message);
-            return { success: false, logs };
-        } finally {
-            pConn.release();
-        }
-    }
-
-    // =========================
-    // CASE 2: Central recovers after missed writes
-    // =========================
-    static async testCase2(NODE_STATE) {
-        let logs = [];
-
-        if (NODE_STATE[0] && db_service.missedWrites[0].length === 0) {
-            logs.push("No missed writes in CENTRAL — nothing to recover.");
-            return { success: true, logs };
-        }
-
-        const cPool = db_router.getNodeById(0);
-        const cConn = await cPool.getConnection();
-
-        try {
-            await cConn.beginTransaction();
-            logs.push("Applying missed writes to CENTRAL...");
-
-            for (let write of db_service.missedWrites[0]) {
-                await cConn.query(write.query);
-                logs.push(`Applied: ${write.query}`);
-            }
-
-            await cConn.commit();
-            db_service.missedWrites[0] = [];
-            logs.push("Recovery complete. CENTRAL is up-to-date.");
-            return { success: true, logs };
-        } catch (err) {
-            logs.push(err.message);
-            return { success: false, logs };
-        } finally {
-            cConn.release();
-        }
-    }
 
     // =========================
     // CASE 3: Central writes, Partition fails
@@ -869,7 +818,7 @@ class db_service {
         let logs = [];
         let cConn;
         let timestamp;
-        const sql = "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        const sql = "INSERT INTO users (firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)";
         let params;
 
         // -------------------------------------------------
@@ -886,7 +835,7 @@ class db_service {
 
             // Use variable for timestamp to ensure consistency
             timestamp = new Date();
-            params = ['case3_real', 'case3_first', 'case3_last', 'City', 'UK', timestamp, timestamp];
+            params = ['case3_first', 'case3_last', 'City', 'UK', timestamp, timestamp];
 
             // Execute query with timeout
             await db_service.queryWithTimeout(cConn, sql, params, 2000);
@@ -982,21 +931,9 @@ class db_service {
                 for (let write of db_service.missedWrites[partition]) {
                     try {
                         await db_service.retryOperation(async () => {
-                            // Check for duplicates first (idempotency)
-                            // Assuming username is unique or we can check existence
-                            // Extract username from params (index 0 based on previous code)
-                            const username = write.params[0]; 
-                            
-                            const [rows] = await pConn.query("SELECT id FROM Users WHERE username = ?", [username]);
-                            
-                            if (rows.length > 0) {
-                                logs.push(`[SKIP] User '${username}' already exists on Partition ${partition}.`);
-                                return; // Skip insert
-                            }
-
                             // Apply the write
                             await db_service.queryWithTimeout(pConn, write.query, write.params, 2000);
-                            logs.push(`[APPLIED] Recovered write for '${username}' on Partition ${partition}.`);
+                            logs.push(`[APPLIED] Recovered write for '${write.params[0]}' on Partition ${partition}.`);
                         }, 3, 500, logs); // 3 retries, 500ms delay
 
                         successCount++;

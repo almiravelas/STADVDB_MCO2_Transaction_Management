@@ -81,7 +81,8 @@ app.put('/api/users/:id', async (req, res) => {
 // 4. DELETE USER
 app.delete('/api/users/:id', async (req, res) => {
     try {
-        const result = await db_service.deleteUser(req.params.id);
+        const { country } = req.query;
+        const result = await db_service.deleteUser(req.params.id, country);
         res.json(result);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -117,12 +118,21 @@ app.get('/api/health', async (req, res) => {
   try {
     const [info] = await node0.query('SELECT DATABASE() as db, VERSION() as version');
     const [tables] = await node0.query('SHOW TABLES');
-    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    // Prioritize 'users' table
+    let tableName = null;
+    const hasUsersLowercase = tables.some(t => Object.values(t)[0] === 'users');
+    if (hasUsersLowercase) {
+        tableName = 'users';
+    } else {
+        tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    }
     
     let rowCount = 0;
     if (tableName) {
-      const [count] = await node0.query(`SELECT COUNT(*) as count FROM ${tableName}`);
-      rowCount = count[0].count;
+      // Use MAX(id) instead of COUNT(*) as per user request for Dashboard
+      const [res] = await node0.query(`SELECT MAX(id) as maxId FROM ${tableName}`);
+      rowCount = res[0].maxId || 0;
     }
     
     results.node0.status = 'connected';
@@ -139,7 +149,15 @@ app.get('/api/health', async (req, res) => {
   try {
     const [info] = await node1.query('SELECT DATABASE() as db, VERSION() as version');
     const [tables] = await node1.query('SHOW TABLES');
-    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    // Prioritize 'users' table
+    let tableName = null;
+    const hasUsersLowercase = tables.some(t => Object.values(t)[0] === 'users');
+    if (hasUsersLowercase) {
+        tableName = 'users';
+    } else {
+        tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    }
     
     let rowCount = 0;
     if (tableName) {
@@ -161,7 +179,15 @@ app.get('/api/health', async (req, res) => {
   try {
     const [info] = await node2.query('SELECT DATABASE() as db, VERSION() as version');
     const [tables] = await node2.query('SHOW TABLES');
-    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    // Prioritize 'users' table
+    let tableName = null;
+    const hasUsersLowercase = tables.some(t => Object.values(t)[0] === 'users');
+    if (hasUsersLowercase) {
+        tableName = 'users';
+    } else {
+        tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    }
     
     let rowCount = 0;
     if (tableName) {
@@ -200,7 +226,15 @@ app.get('/api/node/:id', async (req, res) => {
     const pool = nodeMap[nodeId].pool;
     const [info] = await pool.query('SELECT DATABASE() as db, VERSION() as version');
     const [tables] = await pool.query('SHOW TABLES');
-    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    // Prioritize 'users' table
+    let tableName = null;
+    const hasUsersLowercase = tables.some(t => Object.values(t)[0] === 'users');
+    if (hasUsersLowercase) {
+        tableName = 'users';
+    } else {
+        tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    }
     
     let rowCount = 0;
     let sampleData = [];
@@ -256,7 +290,22 @@ app.get('/api/node/:id/data', async (req, res) => {
   try {
     const pool = nodeMap[nodeId].pool;
     const [tables] = await pool.query('SHOW TABLES');
-    const tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+    
+    // Prioritize 'users' table (lowercase)
+    let tableName = null;
+    const hasUsersLowercase = tables.some(t => Object.values(t)[0] === 'users');
+    
+    if (hasUsersLowercase) {
+        tableName = 'users';
+    } else {
+        // Fallback to case-insensitive search
+        const usersTable = tables.find(t => Object.values(t)[0].toLowerCase() === 'users');
+        if (usersTable) {
+            tableName = Object.values(usersTable)[0];
+        } else {
+            tableName = tables.length > 0 ? Object.values(tables[0])[0] : null;
+        }
+    }
     
     if (!tableName) {
       return res.json({ node: nodeId, message: 'No tables found', data: [] });

@@ -2,27 +2,19 @@ class db_access {
     
     // Find by ID
     static async findById(connection, id) {
-        const [rows] = await connection.execute(
-            'SELECT * FROM users WHERE id = ?', 
-            [id]
-        );
+        const [rows] = await connection.query('SELECT * FROM users WHERE id = ?', [id]);
         return rows[0];
     }
 
     // Find by Country
     static async findByCountry(connection, country) {
-        const query = 'SELECT * FROM users WHERE country LIKE ? LIMIT 50';
-        console.log(`[DB Access] Executing: ${query} with param [${country}]`);
-        const [rows] = await connection.execute(query, [country]);
+        const [rows] = await connection.execute('SELECT * FROM users WHERE country LIKE ? LIMIT 50', [country]);
         return rows;
     }
 
     // Lock Row
     static async lockRow(connection, id) {
-        await connection.query(
-            'SELECT id FROM users WHERE id = ? FOR UPDATE', 
-            [id]
-        );
+        await connection.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [id]);
     }
 
     //Isolation levels: 'READ UNCOMMITTED', 'READ COMMITTED', 'REPEATABLE READ', 'SERIALIZABLE'
@@ -39,32 +31,24 @@ class db_access {
         const values = Object.values(data);
         values.push(id); 
 
-        const sql = `UPDATE users SET ${setClause} WHERE id = ?`;
-        await connection.query(sql, values);
+        await connection.query(`UPDATE users SET ${setClause} WHERE id = ?`, values);
     }
 
     // Dynamic Insert
     static async insertUser(connection, data) {
         const keys = Object.keys(data);
         const values = Object.values(data);
-        
-        // Create placeholders (?, ?, ?)
         const placeholders = keys.map(() => '?').join(', ');
 
-        // Create the SQL: INSERT INTO Users (id, name, createdAt) VALUES (?, ?, ?)
         const sql = `INSERT INTO users (${keys.join(', ')}) VALUES (${placeholders})`;
-        
-        // DEBUGGING: Print the SQL to the console to verify 'createdAt' is there
-        console.log("EXECUTING SQL:", sql);
-        console.log("VALUES:", values);
-
         const [result] = await connection.query(sql, values);
         return result.insertId;
     }
 
     // Delete
     static async deleteUser(connection, id) {
-        await connection.query('DELETE FROM users WHERE id = ?', [id]);
+        const [result] = await connection.query('DELETE FROM users WHERE id = ?', [id]);
+        return result;
     }
 }
 

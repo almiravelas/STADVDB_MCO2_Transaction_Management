@@ -219,16 +219,39 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('modalTitle').innerText="Edit User";
     };
 
-    window.deleteUser = async (id, name) => {
+    window.deleteUser = async (id, name, country) => {
+        if (!id || id === 'undefined') {
+            alert("Error: Invalid User ID");
+            return;
+        }
         if(confirm(`Are you sure you want to delete ${name}?`)) {
             try {
-                await fetch(`/api/users/${id}`, {method:'DELETE'});
+                // Pass country as query param to help backend locate the record if missing in Central
+                const url = country ? `/api/users/${id}?country=${encodeURIComponent(country)}` : `/api/users/${id}`;
+                const res = await fetch(url, {method:'DELETE'});
+                const data = await res.json();
+                
+                if (!res.ok) {
+                    throw new Error(data.error || "Delete failed on server");
+                }
+                
                 addTransaction('delete', name);
                 alert("Deleted successfully");
+                
                 updateStats();
-                if(document.getElementById('viewall-section').classList.contains('active')) loadAllData();
+                
+                // Always try to reload data if the table is visible/active
+                const viewAllSection = document.getElementById('viewall-section');
+                if(viewAllSection && viewAllSection.classList.contains('active')) {
+                    console.log("Reloading data after delete...");
+                    await loadAllData();
+                }
+                
                 document.getElementById('searchResult').style.display='none'; 
-            } catch(e) { alert("Delete failed"); }
+            } catch(e) { 
+                console.error(e);
+                alert("Delete failed: " + e.message); 
+            }
         }
     };
 
@@ -238,8 +261,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.loadAllData = async () => {
         const tbody = document.getElementById('allDataTableBody');
+        const btnFirst = document.getElementById('btnFirstPage');
         const btnPrev = document.getElementById('btnPrevPage');
         const btnNext = document.getElementById('btnNextPage');
+        const btnLast = document.getElementById('btnLastPage');
         const pageInfo = document.getElementById('pageInfo');
 
         tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
@@ -255,6 +280,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const fName = getVal(u, 'firstName', 'firstname', 'first_name', 'FirstName');
                     const lName = getVal(u, 'lastName', 'lastname', 'last_name', 'LastName');
                     const uId = getVal(u, 'id', 'ID', 'Id');
+                    const cleanId = String(uId).trim();
                     const uUsername = getVal(u, 'username', 'Username');
                     const uCountry = getVal(u, 'country', 'Country');
                     const uCity = getVal(u, 'city', 'City');
@@ -267,8 +293,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td>${uCountry}</td>
                         <td style="text-align:right;">
                             <div style="display:flex; justify-content:flex-end; gap:5px;">
-                                <button class="btn-soft btn-soft-blue" onclick="editUser('${uId}','${fName}','${lName}','${uUsername}','${uCity}','${uCountry}')"><i class='bx bx-edit-alt'></i></button>
-                                <button class="btn-soft btn-soft-red" onclick="deleteUser('${uId}','${fName}')"><i class='bx bx-trash'></i></button>
+                                <button class="btn-soft btn-soft-blue" onclick="editUser('${cleanId}','${fName}','${lName}','${uUsername}','${uCity}','${uCountry}')"><i class='bx bx-edit-alt'></i></button>
+                                <button class="btn-soft btn-soft-red" onclick="deleteUser('${cleanId}','${fName}', '${uCountry}')"><i class='bx bx-trash'></i></button>
                             </div>
                         </td>
                     </tr>`;
@@ -278,9 +304,29 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Update Pagination UI
-            if(pageInfo) pageInfo.innerText = `Page ${currentPage}`;
+            const totalRows = json.totalRows || 0;
+            const totalPages = Math.ceil(totalRows / pageSize);
+            
+            // Auto-adjust page if we deleted the last item on the current page
+            if (currentPage > totalPages && totalPages > 0) {
+                console.log("Current page is empty, moving to previous page...");
+                currentPage = totalPages;
+                await loadAllData(); // Recursive call to load the valid page
+                return;
+            }
+
+            if(pageInfo) pageInfo.innerText = `Page ${currentPage} of ${totalPages}`;
+            
+            if(btnFirst) btnFirst.disabled = currentPage === 1;
             if(btnPrev) btnPrev.disabled = currentPage === 1;
-            if(btnNext) btnNext.disabled = (!json.data || json.data.length < pageSize);
+            
+            // Disable Next/Last if we are on the last page OR if there's no data
+            const isLastPage = currentPage >= totalPages || totalPages === 0;
+            if(btnNext) btnNext.disabled = isLastPage;
+            if(btnLast) btnLast.disabled = isLastPage;
+
+            // Store total pages globally or on the element for the Last button handler
+            if(btnLast) btnLast.dataset.totalPages = totalPages;
 
         } catch(e) { 
             console.error(e);
@@ -289,9 +335,20 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Pagination Event Listeners
+    const btnFirst = document.getElementById('btnFirstPage');
     const btnPrev = document.getElementById('btnPrevPage');
     const btnNext = document.getElementById('btnNextPage');
+    const btnLast = document.getElementById('btnLastPage');
     
+    if(btnFirst) {
+        btnFirst.addEventListener('click', () => {
+            if(currentPage > 1) {
+                currentPage = 1;
+                loadAllData();
+            }
+        });
+    }
+
     if(btnPrev) {
         btnPrev.addEventListener('click', () => {
             if(currentPage > 1) {
@@ -303,8 +360,20 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if(btnNext) {
         btnNext.addEventListener('click', () => {
+            // We can check against totalPages stored in the dataset or just rely on the disabled state
+            // But for safety, let's just increment. The button should be disabled if we are at the end.
             currentPage++;
             loadAllData();
+        });
+    }
+
+    if(btnLast) {
+        btnLast.addEventListener('click', () => {
+            const totalPages = parseInt(btnLast.dataset.totalPages) || 1;
+            if(currentPage < totalPages) {
+                currentPage = totalPages;
+                loadAllData();
+            }
         });
     }
 
