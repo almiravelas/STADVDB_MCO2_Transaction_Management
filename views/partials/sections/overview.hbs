@@ -1,0 +1,36 @@
+<section id="overview-section" class="content-section active">
+    <div class="dashboard-grid">
+        <div class="stats-area">
+            <div class="overview-row">
+                <div class="card-purple">
+                    <p style="opacity:0.8; font-size:12px; text-transform:uppercase; letter-spacing:1px;">Total Users</p>
+                    <h1 id="totalUsers">--</h1>
+                    <p style="opacity:0.8; font-size:13px;">Active database records</p>
+                </div>
+                <div class="card-pink">
+                    <h3 style="font-size:16px;">Quick Actions</h3>
+                    <button class="qa-btn" onclick="document.querySelector('[data-view=search]').click()">
+                        <i class='bx bx-search' style="font-size:20px;"></i> <span>Search ID</span>
+                    </button>
+                    <button class="qa-btn" onclick="document.querySelector('[data-view=country]').click()">
+                        <i class='bx bx-map' style="font-size:20px;"></i> <span>Filter Country</span>
+                    </button>
+                </div>
+            </div>
+            <div class="chart-container">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <h3 style="color:#2B3674; font-size:18px;">Registration Analytics</h3>
+                    <span style="background:#F4F7FE; color:#6C5CE7; padding:5px 15px; border-radius:20px; font-size:12px; font-weight:600;">Monthly View</span>
+                </div>
+                <canvas id="growthChart"></canvas>
+            </div>
+        </div>
+        <div class="history-panel">
+            <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
+                <h3 style="font-size:16px;">Activity Log</h3>
+                <button onclick="clearHistory()" style="border:none; background:none; color:#FF6B9D; cursor:pointer;">Clear</button>
+            </div>
+            <div id="transactionList"><p style="color:#aaa; text-align:center; font-size:12px;">No recent activity</p></div>
+        </div>
+    </div>
+</section>

@@ -1,0 +1,21 @@
+<section id="country-section" class="content-section">
+    <div class="card-clean">
+        <h2>Filter Location</h2>
+        <form id="countryForm" style="display:flex; gap:15px; margin-top:20px;">
+            <select id="countrySelect" class="input-field" style="margin-bottom:0;">
+                <option value="">Select Country...</option>
+                <option value="Philippines">Philippines</option>
+                <option value="USA">USA</option>
+                <option value="Mexico">Mexico</option>
+                <option value="Canada">Canada</option>
+                <option value="Australia">Australia</option>
+                <option value="Germany">Germany</option>
+            </select>
+            <button type="submit" class="btn-primary">Filter</button>
+        </form>
+        <div id="usersList" style="margin-top:30px; display:none;">
+            <h3 style="margin-bottom:15px; color:#2B3674;">Results</h3>
+            <div id="usersContainer" class="users-grid"></div>
+        </div>
+    </div>
+</section>

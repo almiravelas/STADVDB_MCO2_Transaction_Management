@@ -1,0 +1,26 @@
+<div id="userModal" class="modal">
+    <div class="modal-content">
+        <h2 id="modalTitle" style="text-align:center; margin-bottom:20px; color:#2B3674;">Edit User</h2>
+        <form id="userForm">
+            <input type="hidden" id="userId">
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="firstName" class="input-field" placeholder="First Name" required>
+                <input type="text" id="lastName" class="input-field" placeholder="Last Name" required>
+            </div>
+            <input type="text" id="username" class="input-field" placeholder="Username" required>
+            <input type="text" id="city" class="input-field" placeholder="City" required>
+            <select id="country" class="input-field" required>
+                <option value="Philippines">Philippines</option>
+                <option value="USA">USA</option>
+                <option value="Mexico">Mexico</option>
+                <option value="Canada">Canada</option>
+                <option value="Australia">Australia</option>
+                <option value="Germany">Germany</option>
+            </select>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+                <button type="button" id="btnCancelModal" style="flex:1; padding:12px; background:#f0f0f0; border:none; border-radius:10px; cursor:pointer;">Cancel</button>
+                <button type="submit" class="btn-primary" style="flex:1; justify-content:center;">Save</button>
+            </div>
+        </form>
+    </div>
+</div>

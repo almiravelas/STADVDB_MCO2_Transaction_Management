@@ -1,0 +1,23 @@
+<section id="search-section" class="content-section">
+    <div class="card-clean">
+        <h2>Search User</h2>
+        <form id="searchForm" style="display:flex; gap:15px; margin-top:25px;">
+            <input type="text" id="searchId" class="input-field" placeholder="ID or Name..." style="margin-bottom:0;" required>
+            <button type="submit" class="btn-primary">Search</button>
+        </form>
+        <div id="searchResult" style="display:none; margin-top:30px; background:#FAFAFA; padding:25px; border-radius:20px; border:1px solid #eee;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h2 id="resultName" style="color:#333;">Name</h2>
+                    <p style="color:#888;">ID: <span id="resultId">--</span> | <span id="resultCity">--</span></p>
+                </div>
+                
+                <div class="action-gap">
+                    <button id="btnEditSearch" class="btn-soft btn-soft-blue" title="Edit"><i class='bx bx-edit-alt'></i></button>
+                    <button id="btnDeleteSearch" class="btn-soft btn-soft-red" title="Delete"><i class='bx bx-trash'></i></button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</section>

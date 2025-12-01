@@ -17,7 +17,8 @@ app.use(express.static('public', { index: false }));
 // View engine (Handlebars)
 app.engine('hbs', exphbs.engine({
   extname: '.hbs',
-  defaultLayout: false, 
+  defaultLayout: false,
+  partialsDir: path.join(__dirname, 'views/partials'),
 }));
 app.set('view engine', 'hbs');
 app.set('views', path.join(__dirname, 'views'));
