@@ -94,6 +94,7 @@
         <nav>
             <button class="nav-item active" data-view="overview"><i class='bx bxs-dashboard'></i><span class="nav-text">Dashboard</span></button>
             <button class="nav-item" data-view="concurrency"><i class='bx bx-git-compare'></i><span class="nav-text">Concurrency Lab</span></button>
+            <button class="nav-item" data-view="failure"><i class='bx bx-failure'><span class="nav-text">Global Failure Recovery</span></i></button>
             <button class="nav-item" data-view="search"><i class='bx bx-search-alt'></i><span class="nav-text">Search User</span></button>
             <button class="nav-item" data-view="country"><i class='bx bxs-map-alt'></i><span class="nav-text">Filter Location</span></button>
             <button class="nav-item" data-view="viewall"><i class='bx bxs-folder'></i><span class="nav-text">View All Data</span></button>
@@ -255,6 +256,39 @@
             </div>
         </section>
 
+        <!--GLOBAL FAILURE RECOVERY SECTION -->
+        <section id="failure-section" class="content-section">
+            <div class="card-clean">
+                <h2 style="margin:0;">Failure Recovery Simulator</h2>
+                <p style="color:#A3AED0; font-size:13px; margin:5px 0 20px 0;">Simulate node failures, recovery, and replica synchronization.</p>
+            <!-- NODE CONTROLS -->
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:20px; margin-top:20px;">
+            
+                <!-- Node 1 -->
+                <div class="card-clean" style="text-align:center;">
+                    <h3>Node 1</h3>
+                    <p id="node1-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <button class="btn-primary" onclick="toggleNode(1)"><i class='bx bx-power-off'></i> Toggle</button>
+                </div>
+
+                <!-- Node 2 -->
+                <div class="card-clean" style="text-align:center;">
+                    <h3>Node 2</h3>
+                    <p id="node2-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <button class="btn-primary" onclick="toggleNode(2)"><i class='bx bx-power-off'></i> Toggle</button>
+                </div>
+
+                <!-- Node 3 -->
+                <div class="card-clean" style="text-align:center;">
+                    <h3>Node 3</h3>
+                    <p id="node3-status" style="font-size:14px; color:#34B53A;">ONLINE</p><button class="btn-primary" onclick="toggleNode(3)"><i class='bx bx-power-off'></i> Toggle</button>
+                </div>
+        </div>
+
+        <h3 style="margin-top:30px;">Event Log</h3>
+        <div class="log-box" id="failureLog">System idle...</div>
+    </div>
+</section>
         <!-- 3. SEARCH SECTION -->
         <section id="search-section" class="content-section">
             <div class="card-clean">
