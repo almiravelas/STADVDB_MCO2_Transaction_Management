@@ -271,6 +271,17 @@ class db_service {
     // =========================================================
     // FAILURE RECOVERY SIMULATION
     // =========================================================
+    static async withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`TIMEOUT after ${ms}ms during ${label}`)), ms)
+        )
+    ]);
+}
+    // =========================================================
+    // CASE 1  
+    // =========================================================
     static async testCase1(NODE_STATE) {
         let logs = [];
         const partitionNode = NODE_STATE[1] ? 1 : 2;
@@ -286,7 +297,7 @@ class db_service {
             await pConn.beginTransaction();
             logs.push(`Writing to Partition ${partitionNode}...`);
             await pConn.query(
-                "INSERT INTO Users (username, country) VALUES ('case1_user','USA')"
+                "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_user', 'case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())"
             );
             await pConn.commit();
             logs.push(`Partition ${partitionNode} write SUCCESS.`);
@@ -294,7 +305,7 @@ class db_service {
             if (!NODE_STATE[0]) {
                 logs.push("CENTRAL is OFFLINE — replication FAILED. Added to missedWrites queue.");
                 db_service.missedWrites[0].push({
-                    query: "INSERT INTO Users (username, country) VALUES ('case1_user','USA')",
+                    query: "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_user', 'case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())",
                 });
                 return { success: true, logs };
             }
@@ -302,13 +313,14 @@ class db_service {
             const cPool = db_router.getNodeById(0);
             const cConn = await cPool.getConnection();
             await cConn.query(
-                "INSERT INTO Users (username, country) VALUES ('case1_user','USA')"
+                "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case1_user', 'case1_first', 'case1_last', 'City', 'USA', NOW(), NOW())"
             );
             cConn.release();
             logs.push("Replication to CENTRAL succeeded.");
             return { success: true, logs };
         } catch (err) {
             logs.push(err.message);
+            await pConn.rollback();
             return { success: false, logs };
         } finally {
             pConn.release();
@@ -321,6 +333,11 @@ class db_service {
     static async testCase2(NODE_STATE) {
         let logs = [];
 
+        if (!NODE_STATE[0]) {
+        logs.push("CENTRAL still OFFLINE — cannot recover.");
+        return { success: false, logs };
+        }
+
         if (NODE_STATE[0] && db_service.missedWrites[0].length === 0) {
             logs.push("No missed writes in CENTRAL — nothing to recover.");
             return { success: true, logs };
@@ -330,20 +347,21 @@ class db_service {
         const cConn = await cPool.getConnection();
 
         try {
-            await cConn.beginTransaction();
+            await db_service.withTimeout(cConn.beginTransaction(), 2000, "Central BEGIN");
             logs.push("Applying missed writes to CENTRAL...");
 
             for (let write of db_service.missedWrites[0]) {
-                await cConn.query(write.query);
+                await db_service.withTimeout(cConn.query(write.query), 2000, "Central APPLY");
                 logs.push(`Applied: ${write.query}`);
             }
 
-            await cConn.commit();
+            await db_service.withTimeout(cConn.commit(), 2000, "Central COMMIT");
             db_service.missedWrites[0] = [];
             logs.push("Recovery complete. CENTRAL is up-to-date.");
             return { success: true, logs };
         } catch (err) {
             logs.push(err.message);
+            await cConn.rollback();  
             return { success: false, logs };
         } finally {
             cConn.release();
@@ -367,7 +385,7 @@ class db_service {
             await cConn.beginTransaction();
             logs.push("Writing to CENTRAL...");
             await cConn.query(
-                "INSERT INTO Users (username, country) VALUES ('case3_user','UK')"
+                "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case3_user', 'case3_first', 'case3_last', 'City', 'UK', NOW(), NOW())"
             );
             await cConn.commit();
             logs.push("CENTRAL write SUCCESS.");
@@ -377,13 +395,13 @@ class db_service {
                 if (!NODE_STATE[partition]) {
                     logs.push(`Partition ${partition} is OFFLINE — replication FAILED.`);
                     db_service.missedWrites[partition].push({
-                        query: "INSERT INTO Users (username, country) VALUES ('case3_user','UK')",
+                        query: "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case3_user', 'case3_first', 'case3_last', 'City', 'UK', NOW(), NOW())",
                     });
                 } else {
                     const pPool = db_router.getNodeById(partition);
                     const pConn = await pPool.getConnection();
                     await pConn.query(
-                        "INSERT INTO Users (username, country) VALUES ('case3_user','UK')"
+                        "INSERT INTO Users (username, firstname, lastname, city, country, createdAt, updatedAt) VALUES ('case3_user', 'case3_first', 'case3_last', 'City', 'UK', NOW(), NOW())"
                     );
                     pConn.release();
                     logs.push(`Replication to Partition ${partition} succeeded.`);
@@ -420,17 +438,18 @@ class db_service {
             const pConn = await pPool.getConnection();
 
             try {
-                await pConn.beginTransaction();
+                await db_service.withTimeout(pConn.beginTransaction(), 2000, "Partition BEGIN");
                 logs.push(`Recovering missed writes for Partition ${partition}...`);
                 for (let write of db_service.missedWrites[partition]) {
                     await pConn.query(write.query);
-                    logs.push(`Applied: ${write.query}`);
+                    await db_service.withTimeout(pConn.query(write.query), 2000, "Partition APPLY");
                 }
-                await pConn.commit();
+                await db_service.withTimeout(pConn.commit(), 2000, "Partition COMMIT");
                 db_service.missedWrites[partition] = [];
                 logs.push(`Partition ${partition} recovery complete.`);
             } catch (err) {
                 logs.push(err.message);
+                await pConn.rollback();  
             } finally {
                 pConn.release();
             }
