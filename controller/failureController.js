@@ -100,47 +100,22 @@ const failureController = {
 
     async getQueueStatus(req, res) {
         try {
-            // Try to get from persistent database queue first
+            // Get from persistent database queue ONLY (in-memory doesn't persist on Vercel)
             const persistentQueue = await db_service.getPersistentQueueStatus();
             
-            // Combine with in-memory queue (for local development fallback)
+            console.log('[Queue Status] Persistent queue:', JSON.stringify({
+                p0: persistentQueue[0],
+                p1: persistentQueue[1],
+                p2: persistentQueue[2]
+            }));
+            
+            // Only use persistent queue counts (in-memory is unreliable on serverless)
             const status = {
-                central: persistentQueue[0] + db_service.missedWrites[0].length,
-                partition1: persistentQueue[1] + db_service.missedWrites[1].length,
-                partition2: persistentQueue[2] + db_service.missedWrites[2].length,
-                total: persistentQueue[0] + persistentQueue[1] + persistentQueue[2] +
-                       db_service.missedWrites[0].length + 
-                       db_service.missedWrites[1].length + 
-                       db_service.missedWrites[2].length,
-                details: {
-                    central: [
-                        ...persistentQueue.details.central,
-                        ...db_service.missedWrites[0].map(w => ({
-                            user: `${w.params[1]} ${w.params[2]}`,
-                            country: w.params[4],
-                            attempts: w.attemptCount,
-                            lastError: w.lastError
-                        }))
-                    ],
-                    partition1: [
-                        ...persistentQueue.details.partition1,
-                        ...db_service.missedWrites[1].map(w => ({
-                            user: `${w.params[1]} ${w.params[2]}`,
-                            country: w.params[4],
-                            attempts: w.attemptCount,
-                            lastError: w.lastError
-                        }))
-                    ],
-                    partition2: [
-                        ...persistentQueue.details.partition2,
-                        ...db_service.missedWrites[2].map(w => ({
-                            user: `${w.params[1]} ${w.params[2]}`,
-                            country: w.params[4],
-                            attempts: w.attemptCount,
-                            lastError: w.lastError
-                        }))
-                    ]
-                }
+                central: persistentQueue[0],
+                partition1: persistentQueue[1],
+                partition2: persistentQueue[2],
+                total: persistentQueue[0] + persistentQueue[1] + persistentQueue[2],
+                details: persistentQueue.details
             };
             res.json(status);
         } catch (err) {
@@ -192,9 +167,9 @@ const failureController = {
                 timestamp: new Date().toISOString(),
                 nodes: {},
                 queues: {
-                    central: queueStatus[0] + db_service.missedWrites[0].length,
-                    partition1: queueStatus[1] + db_service.missedWrites[1].length,
-                    partition2: queueStatus[2] + db_service.missedWrites[2].length
+                    central: queueStatus[0],
+                    partition1: queueStatus[1],
+                    partition2: queueStatus[2]
                 },
                 monitor: db_service.getRecoveryMonitorStatus(),
                 overall: 'HEALTHY'

@@ -161,17 +161,26 @@ class db_service {
             }
 
             console.log(`[Recovery] Partition ${partition}: ${pending.length} pending writes in DB queue`);
+            console.log(`[Recovery] Pending IDs: ${pending.map(p => p.user_id).join(', ')}`);
 
             // Try to connect to partition
             const partitionPool = db_router.getNodeById(partition);
-            partitionConn = await db_service.connectWithTimeout(partitionPool, 2000);
+            
+            try {
+                partitionConn = await db_service.connectWithTimeout(partitionPool, 2000);
+            } catch (connErr) {
+                console.log(`[Recovery] Partition ${partition}: Cannot connect - ${connErr.message}`);
+                return 0;
+            }
 
             for (const write of pending) {
                 try {
                     const params = JSON.parse(write.params_json);
                     const userId = write.user_id;
+                    
+                    console.log(`[Recovery] Processing user ${userId} for partition ${partition}`);
 
-                    // Check if already exists
+                    // Check if already exists in partition
                     const [existing] = await partitionConn.query(
                         "SELECT id FROM users WHERE id = ?", 
                         [userId]
@@ -183,12 +192,13 @@ class db_service {
                             "UPDATE recovery_queue SET status = 'completed', last_attempt_at = NOW() WHERE id = ?",
                             [write.id]
                         );
-                        console.log(`[Recovery] Skipped duplicate ID ${userId}`);
+                        console.log(`[Recovery] ✓ User ${userId} already exists in partition ${partition}, marked complete`);
                         recoveredCount++;
                         continue;
                     }
 
-                    // Execute the write
+                    // Execute the write to partition
+                    console.log(`[Recovery] Inserting user ${userId} into partition ${partition}...`);
                     await db_service.queryWithTimeout(partitionConn, write.query_text, params, 2000);
                     
                     // Mark as completed
@@ -196,7 +206,7 @@ class db_service {
                         "UPDATE recovery_queue SET status = 'completed', last_attempt_at = NOW() WHERE id = ?",
                         [write.id]
                     );
-                    console.log(`[Recovery] ✓ Recovered ID ${userId}`);
+                    console.log(`[Recovery] ✓ Recovered user ${userId} to partition ${partition}`);
                     recoveredCount++;
 
                 } catch (err) {
@@ -306,27 +316,29 @@ class db_service {
                 continue;
             }
 
-            // Try persistent queue first
+            // Try persistent queue first (this is the main queue on Vercel)
             const persistentRecovered = await db_service.processPersistentQueue(partition);
             totalRecovered += persistentRecovered;
             
-            // Also try in-memory queue (for local development)
-            const memoryRecovered = await db_service.attemptPartitionRecovery(partition);
-            totalRecovered += memoryRecovered;
-            totalRemaining += db_service.missedWrites[partition].length;
+            // In-memory queue is only for local development fallback
+            // Don't count it in totalRemaining since it's unreliable on serverless
+            if (db_service.missedWrites[partition].length > 0) {
+                const memoryRecovered = await db_service.attemptPartitionRecovery(partition);
+                totalRecovered += memoryRecovered;
+            }
             
-            if (persistentRecovered + memoryRecovered > 0) {
-                db_service.recoveryMonitor.stats.totalRecoveries += persistentRecovered + memoryRecovered;
+            if (persistentRecovered > 0) {
+                db_service.recoveryMonitor.stats.totalRecoveries += persistentRecovered;
                 db_service.recoveryMonitor.stats.lastRecoveryTime = checkTime;
             }
         }
 
-        // Get persistent queue status for accurate remaining count
+        // Get persistent queue status for accurate remaining count (ONLY source of truth)
         try {
             const queueStatus = await db_service.getPersistentQueueStatus();
-            totalRemaining += queueStatus[1] + queueStatus[2];
+            totalRemaining = queueStatus[1] + queueStatus[2];
         } catch (e) {
-            // Ignore errors, use in-memory count
+            console.error('[Recovery Monitor] Failed to get queue status:', e.message);
         }
 
         // Update last result
