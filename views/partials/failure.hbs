@@ -35,29 +35,14 @@
                 </div>
             </div>
 
-            <!-- RECOVERY MONITOR -->
-            <div class="card-clean" style="margin-top:20px; padding:15px; border-left: 4px solid #4318FF;">
-                <h3 style="margin:0;">Background Recovery Monitor</h3>
-                <p style="color:#A3AED0; font-size:12px; margin:5px 0;">Automatically recovers failed nodes when they come back online</p>
-                <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
-                    <button class="btn-primary" onclick="startMonitor()">
-                        <i class='bx bx-play'></i> Start Monitor
-                    </button>
-                    <button class="btn-primary" onclick="stopMonitor()" style="background:#FF4C4C;">
-                        <i class='bx bx-stop'></i> Stop Monitor
-                    </button>
-                    <button class="btn-primary" onclick="refreshMonitorStatus()" style="background:#FFA500;">
-                        <i class='bx bx-refresh'></i> Refresh Status
-                    </button>
-                    <div id="monitor-status" style="margin-left:auto; font-size:13px; color:#A3AED0;">
-                        Status: <span id="monitor-enabled" style="color:#FF4C4C;">STOPPED</span>
+            <!-- RECOVERY MONITOR STATUS -->
+            <div class="card-clean" style="margin-top:20px; padding:15px; border-left: 4px solid #7C3AED;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <h3 style="margin:0;"><i class='bx bx-sync bx-spin' style="color:#7C3AED;"></i> Background Recovery Monitor</h3>
+                        <p style="color:#A3AED0; font-size:12px; margin:5px 0 0 0;">Automatically running every 10 seconds - recovers queued writes when nodes come back online</p>
                     </div>
-                </div>
-                <div id="monitor-details" style="margin-top:10px; font-size:12px; color:#A3AED0; display:none;">
-                    <div>Last Check: <span id="monitor-lastcheck">Never</span></div>
-                    <div>Total Checks: <span id="monitor-totalchecks">0</span></div>
-                    <div>Total Recoveries: <span id="monitor-totalrecoveries">0</span></div>
-                    <div>Check Interval: <span id="monitor-interval">30000ms</span></div>
+                    <span style="background:#E2FBD7; color:#34B53A; padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600;">ACTIVE</span>
                 </div>
             </div>
 
