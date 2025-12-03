@@ -432,26 +432,41 @@ document.addEventListener('DOMContentLoaded', () => {
             const queueData = await queueRes.json();
             console.log('[updateStats] Queue data:', queueData);
             
-            const updateQueue = (id, count) => {
-                const el = document.getElementById(id);
-                if(el) {
-                    el.innerText = `Queue: ${count}`;
-                    if(count === 0) {
-                        el.style.color = '#34B53A';
-                    } else {
-                        el.style.color = '#FFA500';
-                    }
-                    console.log(`[updateStats] Updated ${id} to ${count}`);
+            // Master queue = total pending writes for all slaves
+            const masterQueueTotal = (queueData.partition1 || 0) + (queueData.partition2 || 0);
+            
+            // Update Master queue display
+            const masterQueueCount = document.getElementById('masterQueueCount');
+            const masterQueueStatus = document.getElementById('masterQueueStatus');
+            if (masterQueueCount) {
+                masterQueueCount.textContent = masterQueueTotal;
+                console.log(`[updateStats] Updated Master queue to ${masterQueueTotal}`);
+            }
+            if (masterQueueStatus) {
+                if (masterQueueTotal === 0) {
+                    masterQueueStatus.style.background = '#E2FBD7';
+                    masterQueueStatus.style.color = '#34B53A';
+                    masterQueueStatus.innerHTML = `<i class='bx bx-check'></i> Queue: 0 pending`;
                 } else {
-                    console.warn(`[updateStats] Element ${id} not found`);
+                    masterQueueStatus.style.background = '#fff8e6';
+                    masterQueueStatus.style.color = '#FFA500';
+                    masterQueueStatus.innerHTML = `<i class='bx bx-time'></i> Queue: ${masterQueueTotal} pending`;
                 }
-            };
-            updateQueue('node0Queue', queueData.central || 0);
-            updateQueue('node1Queue', queueData.partition1 || 0);
-            updateQueue('node2Queue', queueData.partition2 || 0);
+            }
+            
+            // Update Slave pending counts
+            const slave1PendingCount = document.getElementById('slave1PendingCount');
+            if (slave1PendingCount) {
+                slave1PendingCount.textContent = queueData.partition1 || 0;
+            }
+            
+            const slave2PendingCount = document.getElementById('slave2PendingCount');
+            if (slave2PendingCount) {
+                slave2PendingCount.textContent = queueData.partition2 || 0;
+            }
 
             // Update Global Status Card
-            const totalQueue = (queueData.central || 0) + (queueData.partition1 || 0) + (queueData.partition2 || 0);
+            const totalQueue = masterQueueTotal;
             const node0Online = data.node0.status === 'connected';
             const node1Online = data.node1.status === 'connected';
             const node2Online = data.node2.status === 'connected';
@@ -473,26 +488,26 @@ document.addEventListener('DOMContentLoaded', () => {
             let stateDesc = '';
             
             const offlineNodes = [];
-            if (!node0Online) offlineNodes.push('Central');
-            if (!node1Online) offlineNodes.push('Partition 1');
-            if (!node2Online) offlineNodes.push('Partition 2');
+            if (!node0Online) offlineNodes.push('Master');
+            if (!node1Online) offlineNodes.push('Slave 1');
+            if (!node2Online) offlineNodes.push('Slave 2');
 
             if (!allOnline && totalQueue > 0) {
                 currentState = 'FAILURE_WITH_QUEUE';
-                stateMessage = 'Failure Detected - Writes Queued';
-                stateDesc = `${offlineNodes.join(', ')} offline. ${totalQueue} write(s) queued for recovery.`;
+                stateMessage = 'Slave Failure - Writes Queued on Master';
+                stateDesc = `${offlineNodes.join(', ')} offline. Master has ${totalQueue} write(s) queued for replication.`;
             } else if (!allOnline) {
                 currentState = 'DEGRADED';
                 stateMessage = 'Degraded Mode';
-                stateDesc = `${offlineNodes.join(', ')} offline. System operating in degraded mode.`;
+                stateDesc = `${offlineNodes.join(', ')} offline. Master operating in degraded mode.`;
             } else if (totalQueue > 0) {
                 currentState = 'RECOVERING';
-                stateMessage = 'Recovery In Progress';
-                stateDesc = `All nodes online. Processing ${totalQueue} queued write(s)...`;
+                stateMessage = 'Master Replicating to Slaves';
+                stateDesc = `All nodes online. Master replaying ${totalQueue} queued write(s) to Slaves...`;
             } else {
                 currentState = 'HEALTHY';
                 stateMessage = 'All Systems Operational';
-                stateDesc = 'All nodes connected. No pending recovery operations.';
+                stateDesc = 'Master and all Slaves connected. No pending replication.';
             }
 
             // Apply the state styling (only one state at a time)
@@ -521,15 +536,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (details && details.length > 0) {
                         details.forEach((w, i) => {
                             html += `<div style="padding:8px; border-bottom:1px solid #ffe0a0; display:flex; justify-content:space-between;">
-                                <span><strong>${nodeName}:</strong> ${w.user} (${w.country})</span>
+                                <span><strong>→ ${nodeName}:</strong> ${w.user} (${w.country})</span>
                                 <span style="color:#888; font-size:11px;">Attempts: ${w.attempts || 0}</span>
                             </div>`;
                         });
                     }
                 };
-                addDetails('Central', queueData.details.central);
-                addDetails('Partition 1', queueData.details.partition1);
-                addDetails('Partition 2', queueData.details.partition2);
+                // Show pending writes by target Slave (these are in Master's queue)
+                addDetails('Slave 1', queueData.details.partition1);
+                addDetails('Slave 2', queueData.details.partition2);
                 pendingList.innerHTML = html || '<div style="color:#888; text-align:center;">No details available</div>';
             } else {
                 pendingSection.style.display = 'none';

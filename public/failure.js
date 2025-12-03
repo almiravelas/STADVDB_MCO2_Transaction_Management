@@ -156,25 +156,57 @@ async function refreshMonitorStatus() {
         detailsEl.style.display = "none";
     }
     
-    // Update queue displays
-    document.getElementById("node0-queue").textContent = `Queue: ${data.queueSizes.central}`;
-    document.getElementById("node1-queue").textContent = `Queue: ${data.queueSizes.partition1}`;
-    document.getElementById("node2-queue").textContent = `Queue: ${data.queueSizes.partition2}`;
+    // Update Master queue display (single source of truth)
+    const totalPending = (data.queueSizes.partition1 || 0) + (data.queueSizes.partition2 || 0);
+    const masterQueueCount = document.getElementById("master-queue-count");
+    if (masterQueueCount) {
+        masterQueueCount.textContent = totalPending;
+    }
+    
+    // Update Slave pending counts
+    const slave1Count = document.getElementById("slave1-pending-count");
+    if (slave1Count) slave1Count.textContent = data.queueSizes.partition1 || 0;
+    
+    const slave2Count = document.getElementById("slave2-pending-count");
+    if (slave2Count) slave2Count.textContent = data.queueSizes.partition2 || 0;
 }
 
 async function refreshQueueStatus() {
     const res = await fetch(`/failure/queue/status`);
     const data = await res.json();
     
-    // Update queue displays
-    document.getElementById("node0-queue").textContent = `Queue: ${data.central}`;
-    document.getElementById("node1-queue").textContent = `Queue: ${data.partition1}`;
-    document.getElementById("node2-queue").textContent = `Queue: ${data.partition2}`;
+    // Calculate total Master queue (sum of pending writes for all slaves)
+    const totalPending = (data.partition1 || 0) + (data.partition2 || 0);
     
-    // Highlight if there are queued writes
-    document.getElementById("node0-queue").style.color = data.central > 0 ? "#FF4C4C" : "#FFA500";
-    document.getElementById("node1-queue").style.color = data.partition1 > 0 ? "#FF4C4C" : "#FFA500";
-    document.getElementById("node2-queue").style.color = data.partition2 > 0 ? "#FF4C4C" : "#FFA500";
+    // Update Master queue display (single source of truth)
+    const masterQueueCount = document.getElementById("master-queue-count");
+    if (masterQueueCount) {
+        masterQueueCount.textContent = totalPending;
+        const masterQueue = document.getElementById("master-queue");
+        if (masterQueue) {
+            masterQueue.style.background = totalPending > 0 ? "#fff0f0" : "#fff8e6";
+            masterQueue.style.color = totalPending > 0 ? "#FF4C4C" : "#FFA500";
+        }
+    }
+    
+    // Update Slave pending counts (these are subsets of Master's queue)
+    const slave1Count = document.getElementById("slave1-pending-count");
+    if (slave1Count) {
+        slave1Count.textContent = data.partition1 || 0;
+        const slave1Pending = document.getElementById("slave1-pending");
+        if (slave1Pending) {
+            slave1Pending.style.color = data.partition1 > 0 ? "#FFA500" : "#A3AED0";
+        }
+    }
+    
+    const slave2Count = document.getElementById("slave2-pending-count");
+    if (slave2Count) {
+        slave2Count.textContent = data.partition2 || 0;
+        const slave2Pending = document.getElementById("slave2-pending");
+        if (slave2Pending) {
+            slave2Pending.style.color = data.partition2 > 0 ? "#FFA500" : "#A3AED0";
+        }
+    }
 }
 
 // Concurrent transaction simulation
