@@ -929,9 +929,10 @@ class db_service {
             };
             console.log('[DB Service] Full data prepared:', fullData);
 
-            // Determine which partition this user goes to
-            const partitionId = userData.country >= 'M' ? 1 : 2;
-            console.log(`[DB Service] User routes to partition ${partitionId}`);
+            // Determine which partition this user goes to using router
+            // Node 1 = A-L countries, Node 2 = M-Z countries
+            const partitionId = db_router.getPartitionId(userData.country);
+            console.log(`[DB Service] User with country "${userData.country}" routes to partition ${partitionId}`);
 
             // ALWAYS INSERT TO CENTRAL FIRST (before trying partition)
             console.log('[DB Service] Inserting into central...');

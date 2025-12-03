@@ -13,7 +13,7 @@ async function createRecoveryQueueTable() {
     const sql = `
         CREATE TABLE IF NOT EXISTS recovery_queue (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            target_partition INT NOT NULL COMMENT '1 = Partition 1 (M-Z), 2 = Partition 2 (A-L)',
+            target_partition INT NOT NULL COMMENT '1 = Partition 1 (A-L), 2 = Partition 2 (M-Z)',
             user_id INT NOT NULL COMMENT 'The user ID being inserted',
             query_text TEXT NOT NULL COMMENT 'The SQL query to execute',
             params_json TEXT NOT NULL COMMENT 'JSON array of query parameters',
