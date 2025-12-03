@@ -292,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnLast = document.getElementById('btnLastPage');
         const pageInfo = document.getElementById('pageInfo');
 
-        tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8">Loading...</td></tr>';
         try {
             const offset = (currentPage - 1) * pageSize;
             // Added timestamp to prevent caching
@@ -309,6 +309,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const uUsername = getVal(u, 'username', 'Username');
                     const uCountry = getVal(u, 'country', 'Country');
                     const uCity = getVal(u, 'city', 'City');
+                    const uCreatedAt = u.createdAt || u.created_at || u.CreatedAt;
+                    const uUpdatedAt = u.updatedAt || u.updated_at || u.UpdatedAt;
+                    const createdStr = uCreatedAt ? new Date(uCreatedAt).toLocaleDateString() : '--';
+                    const updatedStr = uUpdatedAt ? new Date(uUpdatedAt).toLocaleDateString() : '--';
 
                     tbody.innerHTML += `
                     <tr>
@@ -317,6 +321,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td>${fName} ${lName}</td>
                         <td>${uCity}</td>
                         <td>${uCountry}</td>
+                        <td>${createdStr}</td>
+                        <td>${updatedStr}</td>
                         <td style="text-align:right;">
                             <div style="display:flex; justify-content:flex-end; gap:5px;">
                                 <button class="btn-soft btn-soft-blue" onclick="editUser('${cleanId}','${fName}','${lName}','${uUsername}','${uCity}','${uCountry}')"><i class='bx bx-edit-alt'></i></button>
@@ -326,7 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </tr>`;
                 });
             } else {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">No more records found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:20px;">No more records found</td></tr>';
             }
 
             // Update Pagination UI
@@ -356,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch(e) { 
             console.error(e);
-            tbody.innerHTML = '<tr><td colspan="6">Error loading data</td></tr>'; 
+            tbody.innerHTML = '<tr><td colspan="8">Error loading data</td></tr>'; 
         }
     };
 
@@ -668,16 +674,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td>${u.city || u.City || '--'}</td>
                         <td>${u.country || u.Country || '--'}</td>
                         <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '--'}</td>
+                        <td>${u.updatedAt ? new Date(u.updatedAt).toLocaleDateString() : '--'}</td>
                     </tr>
                 `).join('');
             } else {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#aaa;">No data available</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#aaa;">No data available</td></tr>';
             }
         } catch (e) {
             console.error('Failed to load dashboard preview:', e);
             const tbody = document.getElementById('dashboardPreviewBody');
             if (tbody) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#aaa;">Failed to load</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#aaa;">Failed to load</td></tr>';
             }
         }
     }
