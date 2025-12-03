@@ -4,6 +4,8 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const { node0, node1, node2 } = require('./db/connection');
 const db_service = require('./models/db_service'); 
+const db_router = require('./models/db_router');
+const failureController = require('./controller/failureController');
 const exphbs = require('express-handlebars');
 
 const app = express();
@@ -72,7 +74,8 @@ app.get('/api/debug', async (req, res) => {
 app.post('/api/users', async (req, res) => {
     try {
         console.log('[API] Creating user:', req.body);
-        const result = await db_service.createUser(req.body);
+        const NODE_STATE = failureController.getNodeState();
+        const result = await db_service.createUser(req.body, NODE_STATE);
         console.log('[API] Create result:', result);
         res.json(result);
     } catch (error) {

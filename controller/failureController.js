@@ -8,17 +8,24 @@ let NODE_STATE = {
     2: true    // partition 2
 };
 
+// Export NODE_STATE so other modules can access it
+module.exports.getNodeState = () => NODE_STATE;
+
 module.exports = {
+    getNodeState(req, res) {
+        return res.json({ NODE_STATE });
+    },
+
     nodeOff(req, res) {
         const id = req.params.id;
         NODE_STATE[id] = false;
-        return res.json({ success: true, message: `Node ${id} is now OFFLINE.` });
+        return res.json({ success: true, message: `Node ${id} is now OFFLINE.`, NODE_STATE });
     },
 
     nodeOn(req, res) {
         const id = req.params.id;
         NODE_STATE[id] = true;
-        return res.json({ success: true, message: `Node ${id} is now ONLINE.` });
+        return res.json({ success: true, message: `Node ${id} is now ONLINE.`, NODE_STATE });
     },
 
     // =====================================================

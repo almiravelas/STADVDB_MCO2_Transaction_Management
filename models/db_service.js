@@ -571,8 +571,9 @@ class db_service {
     // CREATE
     // ---------------------------------------------------
 
-    static async createUser(userData) {
+    static async createUser(userData, NODE_STATE = null) {
         console.log('[DB Service] Creating user:', userData);
+        console.log('[DB Service] NODE_STATE:', NODE_STATE);
         
         if (userData.id !== undefined) {
             delete userData.id;
@@ -619,6 +620,41 @@ class db_service {
                 updatedAt: timestamp
             };
             console.log('[DB Service] Full data prepared:', fullData);
+
+            // Determine which partition this user goes to
+            const partitionId = userData.country >= 'M' ? 1 : 2;
+            console.log(`[DB Service] User routes to partition ${partitionId}`);
+
+            // Check if partition is simulated as offline
+            if (NODE_STATE && !NODE_STATE[partitionId]) {
+                console.log(`[DB Service] Partition ${partitionId} is OFFLINE (simulated) - queuing write`);
+                
+                // Commit to central only
+                console.log('[DB Service] Inserting into central...');
+                await db_access.insertUser(centralConn, fullData);
+                console.log('[DB Service] Central insert complete');
+                
+                await centralConn.commit();
+                console.log('[DB Service] Central commit successful');
+                
+                // Queue the write for partition
+                const writeOp = {
+                    query: 'INSERT INTO users (id, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    params: [fullData.id, fullData.firstname, fullData.lastname, fullData.city, fullData.country, fullData.createdAt, fullData.updatedAt],
+                    timestamp: new Date(),
+                    attemptCount: 0
+                };
+                db_service.missedWrites[partitionId].push(writeOp);
+                console.log(`[DB Service] Write queued for partition ${partitionId}. Queue size: ${db_service.missedWrites[partitionId].length}`);
+                
+                return {
+                    success: true,
+                    id: newId,
+                    message: `User created with ID ${newId}. Partition ${partitionId} offline - write queued.`,
+                    queuedForPartition: partitionId,
+                    queueSize: db_service.missedWrites[partitionId].length
+                };
+            }
 
             console.log('[DB Service] Getting partition connection...');
             partitionConn = await Promise.race([
