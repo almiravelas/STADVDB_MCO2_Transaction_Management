@@ -637,17 +637,17 @@ class db_service {
             const partitionId = userData.country >= 'M' ? 1 : 2;
             console.log(`[DB Service] User routes to partition ${partitionId}`);
 
+            // ALWAYS INSERT TO CENTRAL FIRST (before trying partition)
+            console.log('[DB Service] Inserting into central...');
+            await db_access.insertUser(centralConn, fullData);
+            console.log('[DB Service] Central insert complete');
+            
+            await centralConn.commit();
+            console.log('[DB Service] Central commit successful - user now exists in database');
+
             // Check if partition is simulated as offline
             if (NODE_STATE && !NODE_STATE[partitionId]) {
                 console.log(`[DB Service] Partition ${partitionId} is OFFLINE (simulated) - queuing write`);
-                
-                // Commit to central only
-                console.log('[DB Service] Inserting into central...');
-                await db_access.insertUser(centralConn, fullData);
-                console.log('[DB Service] Central insert complete');
-                
-                await centralConn.commit();
-                console.log('[DB Service] Central commit successful');
                 
                 // Queue the write for partition
                 const writeOp = {
@@ -674,6 +674,7 @@ class db_service {
                 };
             }
 
+            // Try to get partition connection and replicate
             console.log('[DB Service] Getting partition connection...');
             try {
                 partitionConn = await Promise.race([
@@ -681,14 +682,23 @@ class db_service {
                     new Promise((_, reject) => setTimeout(() => reject(new Error('Partition connection timeout')), 3000))
                 ]);
                 console.log('[DB Service] Partition connection acquired');
-            } catch (connError) {
-                console.error(`[DB Service] Failed to connect to partition ${partitionId}:`, connError.message);
                 
-                // REAL FAILURE DETECTED - Queue the write
-                console.log('[DB Service] Committing to central only...');
-                await db_access.insertUser(centralConn, fullData);
-                await centralConn.commit();
-                console.log('[DB Service] Central commit successful');
+                await partitionConn.beginTransaction();
+                console.log('[DB Service] Transaction started on partition');
+
+                // Insert into partition
+                console.log('[DB Service] Inserting into partition...');
+                await db_access.insertUser(partitionConn, fullData);
+                console.log('[DB Service] Partition insert complete');
+                
+                await partitionConn.commit();
+                console.log('[DB Service] Partition commit successful');
+                
+            } catch (connError) {
+                console.error(`[DB Service] Failed to replicate to partition ${partitionId}:`, connError.message);
+                
+                // PARTITION FAILED - but Central already committed, so queue for later
+                console.log('[DB Service] Central write already committed, queuing partition write');
                 
                 // Queue the write for partition
                 const writeOp = {
@@ -716,25 +726,8 @@ class db_service {
                     reason: 'REAL_CONNECTION_FAILURE'
                 };
             }
-            
-            await partitionConn.beginTransaction();
-            console.log('[DB Service] Transaction started on partition');
 
-            // 4. Insert into both nodes
-            console.log('[DB Service] Inserting into central...');
-            await db_access.insertUser(centralConn, fullData);
-            console.log('[DB Service] Central insert complete');
-            
-            console.log('[DB Service] Inserting into partition...');
-            await db_access.insertUser(partitionConn, fullData);
-            console.log('[DB Service] Partition insert complete');
-
-            console.log('[DB Service] Committing central...');
-            await centralConn.commit();
-            console.log('[DB Service] Committing partition...');
-            await partitionConn.commit();
-            console.log('[DB Service] Both commits successful');
-
+            // Both successful
             return {
                 success: true,
                 id: newId,
