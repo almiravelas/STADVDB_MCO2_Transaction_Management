@@ -72,3 +72,299 @@ label { display: block; font-size: 12px; font-weight: 700; color: #A3AED0; margi
 .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
 .badge-read { background: #E2FBD7; color: #34B53A; }
 .badge-write { background: #FFE5E5; color: #FF4C4C; }
+
+/* =========================================================
+   MOBILE RESPONSIVE STYLES
+   ========================================================= */
+
+/* Mobile menu toggle button */
+.mobile-menu-toggle {
+    display: none;
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    z-index: 200;
+    background: #7C3AED;
+    border: none;
+    color: white;
+    width: 45px;
+    height: 45px;
+    border-radius: 12px;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4);
+    align-items: center;
+    justify-content: center;
+}
+
+/* Mobile overlay for sidebar */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+    backdrop-filter: blur(3px);
+}
+
+/* --- TABLET BREAKPOINT (max-width: 1024px) --- */
+@media (max-width: 1024px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+    .overview-row { grid-template-columns: 1fr; }
+    .sim-grid { grid-template-columns: 1fr; }
+    
+    .data-table { font-size: 13px; }
+    .data-table th, .data-table td { padding: 12px 8px; }
+}
+
+/* --- MOBILE BREAKPOINT (max-width: 768px) --- */
+@media (max-width: 768px) {
+    /* Hide elements with hide-mobile class */
+    .hide-mobile { display: none !important; }
+    
+    /* Show mobile menu toggle */
+    .mobile-menu-toggle { display: flex; }
+    
+    /* Hide sidebar by default on mobile */
+    .sidebar {
+        transform: translateX(-100%);
+        width: 280px;
+    }
+    
+    /* Show sidebar when active */
+    .sidebar.mobile-open {
+        transform: translateX(0);
+    }
+    
+    /* Show overlay when sidebar is open */
+    .sidebar-overlay.active { display: block; }
+    
+    /* Hide toggle button inside sidebar on mobile */
+    .toggle-btn { display: none; }
+    
+    /* Adjust main content for mobile */
+    .main-content {
+        margin-left: 0 !important;
+        padding: 80px 15px 20px 15px;
+    }
+    
+    /* Header adjustments */
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .header h1 { font-size: 22px !important; }
+    
+    #btnAddUser {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    /* Dashboard cards stack */
+    .dashboard-grid { grid-template-columns: 1fr; gap: 15px; }
+    .overview-row { grid-template-columns: 1fr; gap: 15px; }
+    
+    /* Cards padding */
+    .card-clean { padding: 20px; border-radius: 15px; }
+    .card-purple, .card-pink { padding: 20px; border-radius: 15px; }
+    
+    /* Quick actions grid */
+    .card-purple .qa-grid, .card-pink .qa-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+    
+    /* Form adjustments */
+    .input-field { padding: 14px 15px; font-size: 16px; } /* Prevent zoom on iOS */
+    
+    /* Button adjustments */
+    .btn-primary { padding: 14px 20px; width: 100%; justify-content: center; }
+    .btn-soft { padding: 10px 12px; }
+    
+    /* Table responsive - horizontal scroll */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 0 -20px;
+        padding: 0 20px;
+    }
+    
+    .data-table { min-width: 600px; }
+    .data-table th, .data-table td { 
+        padding: 12px 10px; 
+        font-size: 13px;
+        white-space: nowrap;
+    }
+    
+    /* Modal adjustments */
+    .modal-content {
+        margin: 15px;
+        max-width: calc(100% - 30px);
+        padding: 25px 20px;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    
+    /* Log box adjustments */
+    .log-box { 
+        height: 300px; 
+        font-size: 11px;
+        padding: 12px;
+    }
+    
+    /* Simulation grid */
+    .sim-grid { grid-template-columns: 1fr; gap: 15px; }
+    
+    /* Case cards grid */
+    .case-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+    
+    .case-card { padding: 12px; }
+    .case-card h4 { font-size: 14px; }
+    .case-card p { font-size: 11px; }
+    
+    /* User cards */
+    .user-card-new { 
+        padding: 12px; 
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    
+    .user-card-new .uc-actions {
+        width: 100%;
+        display: flex;
+        gap: 10px;
+        margin-top: 5px;
+    }
+    
+    .user-card-new .uc-actions .btn-soft {
+        flex: 1;
+        justify-content: center;
+    }
+    
+    /* History items */
+    .history-item { padding: 12px 0; }
+    
+    /* Node status cards */
+    .node-status-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    /* Health tab adjustments */
+    .health-grid { grid-template-columns: 1fr !important; }
+    
+    /* Country search */
+    .search-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .search-row .input-field { width: 100%; }
+    .search-row .btn-primary { width: 100%; }
+    
+    /* Pagination */
+    .pagination {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 5px;
+    }
+    
+    .pagination button {
+        min-width: 40px;
+        padding: 10px;
+    }
+}
+
+/* --- SMALL MOBILE BREAKPOINT (max-width: 480px) --- */
+@media (max-width: 480px) {
+    .main-content { padding: 70px 12px 15px 12px; }
+    
+    .header h1 { font-size: 20px !important; }
+    
+    .card-clean { padding: 15px; border-radius: 12px; }
+    .card-purple, .card-pink { padding: 15px; border-radius: 12px; }
+    
+    /* Stack quick action buttons */
+    .card-purple .qa-grid, .card-pink .qa-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    /* Case cards single column on very small screens */
+    .case-grid { grid-template-columns: 1fr; }
+    
+    /* Smaller log box */
+    .log-box { height: 250px; font-size: 10px; }
+    
+    /* User cards fully stacked */
+    .user-card-new {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .uc-icon { width: 40px; height: 40px; font-size: 18px; }
+    
+    /* Table even more compact */
+    .data-table { min-width: 500px; }
+    .data-table th, .data-table td { 
+        padding: 10px 8px; 
+        font-size: 12px;
+    }
+    
+    /* Modal full width */
+    .modal-content {
+        margin: 10px;
+        max-width: calc(100% - 20px);
+        padding: 20px 15px;
+    }
+    
+    /* Sidebar adjustments for small screens */
+    .sidebar { width: 260px; }
+    .sidebar-logo { font-size: 18px; }
+    .nav-item { padding: 12px; font-size: 14px; }
+    
+    /* Badge smaller */
+    .badge { padding: 3px 8px; font-size: 10px; }
+}
+
+/* --- LANDSCAPE MOBILE FIX --- */
+@media (max-height: 500px) and (orientation: landscape) {
+    .sidebar { padding: 10px; }
+    .sidebar-logo { margin-bottom: 20px; }
+    .nav-item { padding: 10px; margin-bottom: 2px; }
+    
+    .modal-content { max-height: 85vh; }
+    .log-box { height: 200px; }
+}
+
+/* --- TOUCH DEVICE ENHANCEMENTS --- */
+@media (hover: none) and (pointer: coarse) {
+    /* Larger touch targets */
+    .nav-item { padding: 16px; }
+    .btn-primary, .btn-soft { min-height: 48px; }
+    .case-card { padding: 18px; }
+    
+    /* Remove hover effects that don't work on touch */
+    .nav-item:hover { background: none; }
+    .nav-item.active:hover { background: #fff; }
+    .case-card:hover { border-color: transparent; background: #F4F7FE; }
+    .user-card-new:hover { transform: none; box-shadow: none; }
+}
+
+/* --- PRINT STYLES --- */
+@media print {
+    .sidebar, .mobile-menu-toggle, .sidebar-overlay { display: none !important; }
+    .main-content { margin-left: 0 !important; padding: 20px !important; }
+    .btn-primary, .btn-soft, .btn-refresh { display: none !important; }
+}
+

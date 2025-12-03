@@ -6,12 +6,12 @@
                 <label>ID</label>
                 <input type="number" id="userId" class="input-field" placeholder="User ID" required>
                 
-                <div style="display:flex; gap:10px;">
-                    <div style="flex:1">
+                <div class="form-row" style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:140px;">
                         <label>First Name</label>
                         <input type="text" id="firstName" class="input-field" placeholder="First Name" required>
                     </div>
-                    <div style="flex:1">
+                    <div style="flex:1; min-width:140px;">
                         <label>Last Name</label>
                         <input type="text" id="lastName" class="input-field" placeholder="Last Name" required>
                     </div>
@@ -20,12 +20,12 @@
                 <label>Username (Auto-generated if empty)</label>
                 <input type="text" id="username" class="input-field" placeholder="Username">
 
-                <div style="display:flex; gap:10px;">
-                    <div style="flex:1">
+                <div class="form-row" style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:140px;">
                         <label>City</label>
                         <input type="text" id="city" class="input-field" placeholder="City" required>
                     </div>
-                    <div style="flex:1">
+                    <div style="flex:1; min-width:140px;">
                         <label>Country</label>
                         <select id="country" class="input-field" required>
                             <option value="Philippines">Philippines</option>
@@ -38,9 +38,9 @@
                     </div>
                 </div>
 
-                <div style="display:flex; gap:10px; margin-top:10px;">
-                    <button type="button" id="btnCancelModal" style="flex:1; padding:12px; background:#f0f0f0; border:none; border-radius:10px; cursor:pointer;">Cancel</button>
-                    <button type="submit" class="btn-primary" style="flex:1; justify-content:center;">Save</button>
+                <div class="form-row" style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
+                    <button type="button" id="btnCancelModal" style="flex:1; min-width:100px; padding:12px; background:#f0f0f0; border:none; border-radius:10px; cursor:pointer;">Cancel</button>
+                    <button type="submit" class="btn-primary" style="flex:1; min-width:100px; justify-content:center;">Save</button>
                 </div>
             </form>
         </div>

@@ -2,13 +2,23 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#7C3AED">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>DB Manager</title>
     <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
+    <!-- Mobile Menu Toggle -->
+    <button class="mobile-menu-toggle" id="mobileMenuToggle">
+        <i class='bx bx-menu'></i>
+    </button>
+    
+    <!-- Sidebar Overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    
     {{> sidebar}}
     
     <main class="main-content">
@@ -27,5 +37,54 @@
 
     <script src="/js/main.js"></script>
     <script src="/failure.js"></script>
+    
+    <!-- Mobile Menu Script -->
+    <script>
+    (function() {
+        const mobileToggle = document.getElementById('mobileMenuToggle');
+        const sidebar = document.querySelector('.sidebar');
+        const overlay = document.getElementById('sidebarOverlay');
+        
+        function openMobileMenu() {
+            sidebar.classList.add('mobile-open');
+            overlay.classList.add('active');
+            mobileToggle.innerHTML = "<i class='bx bx-x'></i>";
+            document.body.style.overflow = 'hidden';
+        }
+        
+        function closeMobileMenu() {
+            sidebar.classList.remove('mobile-open');
+            overlay.classList.remove('active');
+            mobileToggle.innerHTML = "<i class='bx bx-menu'></i>";
+            document.body.style.overflow = '';
+        }
+        
+        mobileToggle.addEventListener('click', function() {
+            if (sidebar.classList.contains('mobile-open')) {
+                closeMobileMenu();
+            } else {
+                openMobileMenu();
+            }
+        });
+        
+        overlay.addEventListener('click', closeMobileMenu);
+        
+        // Close menu when nav item is clicked
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', function() {
+                if (window.innerWidth <= 768) {
+                    closeMobileMenu();
+                }
+            });
+        });
+        
+        // Handle resize
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                closeMobileMenu();
+            }
+        });
+    })();
+    </script>
 </body>
 </html>

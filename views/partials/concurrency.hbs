@@ -1,17 +1,17 @@
         <!-- 2. CONCURRENCY LAB SECTION -->
         <section id="concurrency-section" class="content-section">
             <div class="card-clean">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:15px;">
                     <div>
                         <h2 style="margin:0;">Simulation Control</h2>
                         <p style="color:#A3AED0; font-size:13px; margin:5px 0 0 0;">Test isolation levels and locking mechanisms</p>
                     </div>
-                    <button class="btn-primary" onclick="createTestUser()">
+                    <button class="btn-primary" onclick="createTestUser()" style="flex-shrink:0;">
                         <i class='bx bx-reset'></i> Reset User 101
                     </button>
                 </div>
 
-                <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:15px; margin-bottom:25px;">
+                <div class="case-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:15px; margin-bottom:25px;">
                     <div class="case-card" onclick="setCase(1)">
                         <h4>Case 1: Read-Read</h4>
                         <p>No blocking expected</p>
@@ -28,10 +28,10 @@
 
                 <div style="background: #F4F7FE; padding: 15px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #E0E5F2;">
                     <label style="margin-bottom: 8px;">Target User ID (Critical for Concurrency)</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="simGlobalId" class="input-field" placeholder="e.g. 101 (Leave EMPTY for Random User)" style="margin-bottom: 0;">
-                        <button class="btn-primary" onclick="runSimulation()" style="white-space: nowrap; background:#111;">
-                            <i class='bx bx-play'></i> RUN SIMULATION
+                    <div class="search-row" style="display: flex; gap: 10px; flex-wrap:wrap;">
+                        <input type="text" id="simGlobalId" class="input-field" placeholder="e.g. 101 (Leave EMPTY for Random User)" style="margin-bottom: 0; flex:1; min-width:200px;">
+                        <button class="btn-primary" onclick="runSimulation()" style="white-space: nowrap; background:#111; flex-shrink:0;">
+                            <i class='bx bx-play'></i> RUN
                         </button>
                     </div>
                     <p style="font-size: 11px; color: #A3AED0; margin: 5px 0 0 5px;">
@@ -42,12 +42,12 @@
 
                 <div class="sim-grid">
                     <div style="background:#FAFAFA; padding:20px; border-radius:15px; border:1px solid #E0E5F2;">
-                        <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
                             <h3 style="margin:0; font-size:16px;">Transaction A</h3>
                             <span class="badge badge-write" id="badgeA">WRITE</span>
                         </div>
                         <form id="formA">
-                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap:10px;">
                                 <div>
                                     <label>Operation</label>
                                     <select name="type" class="input-field" onchange="updateBadge('A', this.value)">
@@ -74,12 +74,12 @@
                     </div>
 
                     <div style="background:#FAFAFA; padding:20px; border-radius:15px; border:1px solid #E0E5F2;">
-                        <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
                             <h3 style="margin:0; font-size:16px;">Transaction B</h3>
                             <span class="badge badge-read" id="badgeB">READ</span>
                         </div>
                         <form id="formB">
-                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap:10px;">
                                 <div>
                                     <label>Operation</label>
                                     <select name="type" class="input-field" onchange="updateBadge('B', this.value)">

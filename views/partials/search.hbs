@@ -2,12 +2,12 @@
         <section id="search-section" class="content-section">
             <div class="card-clean">
                 <h2>Search User</h2>
-                <form id="searchForm" style="display:flex; gap:15px; margin-top:25px;">
-                    <input type="text" id="searchId" class="input-field" placeholder="ID or Name..." style="margin-bottom:0;" required>
-                    <button type="submit" class="btn-primary">Search</button>
+                <form id="searchForm" class="search-row" style="display:flex; gap:15px; margin-top:25px; flex-wrap:wrap;">
+                    <input type="text" id="searchId" class="input-field" placeholder="ID or Name..." style="margin-bottom:0; flex:1; min-width:200px;" required>
+                    <button type="submit" class="btn-primary" style="flex-shrink:0;">Search</button>
                 </form>
                 <div id="searchResult" style="display:none; margin-top:30px; background:#FAFAFA; padding:25px; border-radius:20px; border:1px solid #eee;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
                         <div>
                             <h2 id="resultName" style="color:#333; margin:0;">Name</h2>
                             <p style="color:#888; margin:5px 0 0 0;">ID: <span id="resultId">--</span> | <span id="resultCity">--</span></p>

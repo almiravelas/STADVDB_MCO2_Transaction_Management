@@ -2,8 +2,8 @@
         <section id="country-section" class="content-section">
             <div class="card-clean">
                 <h2>Filter Location</h2>
-                <form id="countryForm" style="display:flex; gap:15px; margin-top:20px;">
-                    <select id="countrySelect" class="input-field" style="margin-bottom:0;">
+                <form id="countryForm" class="search-row" style="display:flex; gap:15px; margin-top:20px; flex-wrap:wrap;">
+                    <select id="countrySelect" class="input-field" style="margin-bottom:0; flex:1; min-width:180px;">
                         <option value="">Select Country...</option>
                         <option value="Philippines">Philippines</option>
                         <option value="USA">USA</option>
@@ -12,11 +12,11 @@
                         <option value="Australia">Australia</option>
                         <option value="Germany">Germany</option>
                     </select>
-                    <button type="submit" class="btn-primary">Filter</button>
+                    <button type="submit" class="btn-primary" style="flex-shrink:0;">Filter</button>
                 </form>
                 <div id="usersList" style="margin-top:30px; display:none;">
                     <h3 style="margin-bottom:15px; color:#2B3674;">Results</h3>
-                    <div id="usersContainer" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:15px;"></div>
+                    <div id="usersContainer" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:15px;"></div>
                 </div>
             </div>
         </section>

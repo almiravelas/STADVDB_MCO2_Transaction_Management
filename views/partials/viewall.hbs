@@ -1,11 +1,11 @@
         <!-- 5. VIEW ALL SECTION -->
         <section id="viewall-section" class="content-section">
             <div class="card-clean">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <h2>All Records</h2>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <h2 style="margin:0;">All Records</h2>
                     <span style="background:#E2FBD7; color:#34B53A; padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600;">Live Data</span>
                 </div>
-                <div style="overflow-x:auto; margin-top:20px;">
+                <div class="table-responsive" style="margin-top:20px;">
                     <table class="data-table">
                         <thead>
                             <tr style="border-bottom:1px solid #F4F7FE; color:#A3AED0; font-size:12px;">
@@ -15,13 +15,13 @@
                         <tbody id="allDataTableBody"></tbody>
                     </table>
                 </div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
+                <div class="pagination" style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; flex-wrap:wrap; gap:15px;">
                     <span id="pageInfo" style="color:#A3AED0; font-size:14px;">Page 1</span>
-                    <div style="display:flex; gap:10px;">
-                        <button id="btnFirstPage" class="btn-soft" disabled><i class='bx bx-chevrons-left'></i> First</button>
-                        <button id="btnPrevPage" class="btn-soft" disabled><i class='bx bx-chevron-left'></i> Prev</button>
-                        <button id="btnNextPage" class="btn-soft">Next <i class='bx bx-chevron-right'></i></button>
-                        <button id="btnLastPage" class="btn-soft">Last <i class='bx bx-chevrons-right'></i></button>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button id="btnFirstPage" class="btn-soft" disabled><i class='bx bx-chevrons-left'></i><span class="hide-mobile"> First</span></button>
+                        <button id="btnPrevPage" class="btn-soft" disabled><i class='bx bx-chevron-left'></i><span class="hide-mobile"> Prev</span></button>
+                        <button id="btnNextPage" class="btn-soft"><span class="hide-mobile">Next </span><i class='bx bx-chevron-right'></i></button>
+                        <button id="btnLastPage" class="btn-soft"><span class="hide-mobile">Last </span><i class='bx bx-chevrons-right'></i></button>
                     </div>
                 </div>
             </div>
