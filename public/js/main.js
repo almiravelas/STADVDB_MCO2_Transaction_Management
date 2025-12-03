@@ -197,8 +197,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = document.getElementById('userId').disabled ? `/api/users/${id}` : '/api/users';
         
         try {
+            console.log('[Add User] Submitting:', data);
             const response = await fetch(url, { method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
             const result = await response.json();
+            console.log('[Add User] Server response:', result);
             
             addTransaction(method === 'POST' ? 'add' : 'edit', data.firstName);
             
@@ -210,11 +212,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
             modal.style.display='none';
+            
+            console.log('[Add User] Updating stats...');
             await updateStats();
             
-            // Always reload data after add/edit to show the new user
+            console.log('[Add User] Loading all data...');
             await loadAllData();
-        } catch(e) { alert("Error: " + e.message); }
+            console.log('[Add User] Data reload complete');
+        } catch(e) { 
+            console.error('[Add User] Error:', e);
+            alert("Error: " + e.message); 
+        }
     };
 
     // 6. SHARED FUNCTIONS
@@ -390,8 +398,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.updateStats = async () => {
         try {
+            console.log('[updateStats] Fetching health data...');
             const res = await fetch('/api/health');
             const data = await res.json();
+            console.log('[updateStats] Health data:', data);
             document.getElementById('totalUsers').innerText = data.node0.rowCount || 0;
             
             const updateStatus = (id, s) => {
@@ -404,8 +414,10 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus('node2Status', data.node2.status);
 
             // Fetch and update queue status
+            console.log('[updateStats] Fetching queue status...');
             const queueRes = await fetch('/failure/queue/status');
             const queueData = await queueRes.json();
+            console.log('[updateStats] Queue data:', queueData);
             
             const updateQueue = (id, count) => {
                 const el = document.getElementById(id);
@@ -416,12 +428,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         el.style.color = '#FFA500';
                     }
+                    console.log(`[updateStats] Updated ${id} to ${count}`);
+                } else {
+                    console.warn(`[updateStats] Element ${id} not found`);
                 }
             };
             updateQueue('node0Queue', queueData.central || 0);
             updateQueue('node1Queue', queueData.partition1 || 0);
             updateQueue('node2Queue', queueData.partition2 || 0);
-        } catch(e) {}
+        } catch(e) { 
+            console.error('[updateStats] Error:', e);
+        }
     };
 
     // HISTORY HELPER
@@ -460,6 +477,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     renderHistory();
     updateStats();
+    
+    // Auto-refresh stats every 5 seconds to show queue changes from automatic recovery
+    setInterval(() => {
+        console.log('[Auto-refresh] Updating stats...');
+        updateStats();
+    }, 5000);
 
     // 7. SEARCH FUNCTIONALITY
     const searchForm = document.getElementById('searchForm');
