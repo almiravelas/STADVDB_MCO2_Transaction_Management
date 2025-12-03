@@ -945,28 +945,32 @@ class db_service {
             if (NODE_STATE && !NODE_STATE[partitionId]) {
                 console.log(`[DB Service] Partition ${partitionId} is OFFLINE (simulated) - queuing write`);
                 
-                // Queue the write for partition
-                const writeOp = {
-                    query: 'INSERT INTO users (id, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    params: [fullData.id, fullData.firstname, fullData.lastname, fullData.city, fullData.country, fullData.createdAt, fullData.updatedAt],
-                    timestamp: new Date(),
-                    attemptCount: 0
-                };
-                db_service.missedWrites[partitionId].push(writeOp);
-                console.log(`[DB Service] Write queued for partition ${partitionId}. Queue size: ${db_service.missedWrites[partitionId].length}`);
+                // Queue the write for partition using PERSISTENT queue
+                const sql = 'INSERT INTO users (id, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)';
+                const params = [fullData.id, fullData.firstname, fullData.lastname, fullData.city, fullData.country, fullData.createdAt, fullData.updatedAt];
                 
-                // Trigger immediate recovery attempt in background
-                setTimeout(async () => {
-                    console.log(`[DB Service] Triggering immediate recovery check for partition ${partitionId}...`);
-                    await db_service.attemptPartitionRecovery(partitionId);
-                }, 100);
+                await db_service.queueMissedWrite(
+                    partitionId,
+                    fullData.id,
+                    sql,
+                    params,
+                    new Error('Node is OFFLINE (simulated)')
+                );
+                console.log(`[DB Service] Write queued for partition ${partitionId} in persistent queue`);
+                
+                // Get queue count from persistent storage
+                let queueSize = 1;
+                try {
+                    const queueStatus = await db_service.getPersistentQueueStatus();
+                    queueSize = queueStatus[partitionId];
+                } catch (e) { /* ignore */ }
                 
                 return {
                     success: true,
                     id: newId,
                     message: `User created with ID ${newId}. Partition ${partitionId} offline - write queued.`,
                     queuedForPartition: partitionId,
-                    queueSize: db_service.missedWrites[partitionId].length
+                    queueSize: queueSize
                 };
             }
 
@@ -994,31 +998,34 @@ class db_service {
                 console.error(`[DB Service] Failed to replicate to partition ${partitionId}:`, connError.message);
                 
                 // PARTITION FAILED - but Central already committed, so queue for later
-                console.log('[DB Service] Central write already committed, queuing partition write');
+                console.log('[DB Service] Central write already committed, queuing partition write in persistent queue');
                 
-                // Queue the write for partition
-                const writeOp = {
-                    query: 'INSERT INTO users (id, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    params: [fullData.id, fullData.firstname, fullData.lastname, fullData.city, fullData.country, fullData.createdAt, fullData.updatedAt],
-                    timestamp: new Date(),
-                    attemptCount: 0,
-                    lastError: connError.message
-                };
-                db_service.missedWrites[partitionId].push(writeOp);
-                console.log(`[DB Service] Write queued for partition ${partitionId} due to connection failure. Queue size: ${db_service.missedWrites[partitionId].length}`);
+                // Queue the write for partition using PERSISTENT queue
+                const sql = 'INSERT INTO users (id, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)';
+                const params = [fullData.id, fullData.firstname, fullData.lastname, fullData.city, fullData.country, fullData.createdAt, fullData.updatedAt];
                 
-                // Trigger immediate recovery attempt in background
-                setTimeout(async () => {
-                    console.log(`[DB Service] Triggering immediate recovery check for partition ${partitionId}...`);
-                    await db_service.attemptPartitionRecovery(partitionId);
-                }, 100);
+                await db_service.queueMissedWrite(
+                    partitionId,
+                    fullData.id,
+                    sql,
+                    params,
+                    connError
+                );
+                console.log(`[DB Service] Write queued for partition ${partitionId} in persistent queue`);
+                
+                // Get queue count from persistent storage
+                let queueSize = 1;
+                try {
+                    const queueStatus = await db_service.getPersistentQueueStatus();
+                    queueSize = queueStatus[partitionId];
+                } catch (e) { /* ignore */ }
                 
                 return {
                     success: true,
                     id: newId,
                     message: `User created with ID ${newId}. Partition ${partitionId} connection failed - write queued.`,
                     queuedForPartition: partitionId,
-                    queueSize: db_service.missedWrites[partitionId].length,
+                    queueSize: queueSize,
                     reason: 'REAL_CONNECTION_FAILURE'
                 };
             }
