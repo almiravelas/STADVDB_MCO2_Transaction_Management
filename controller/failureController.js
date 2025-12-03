@@ -205,6 +205,47 @@ const failureController = {
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
         }
+    },
+
+    // Manual trigger for recovery of a specific partition
+    async triggerRecovery(req, res) {
+        const partition = parseInt(req.params.partition);
+        
+        if (isNaN(partition) || partition < 1 || partition > 2) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Invalid partition. Must be 1 or 2.' 
+            });
+        }
+
+        try {
+            console.log(`[MANUAL RECOVERY] Triggered for partition ${partition}`);
+            
+            // Check if node is healthy first
+            const isHealthy = await db_service.isNodeHealthy(partition, 3000);
+            if (!isHealthy) {
+                return res.json({
+                    success: false,
+                    message: `Partition ${partition} is not reachable. Cannot recover.`
+                });
+            }
+
+            // Process the persistent queue for this partition
+            const result = await db_service.processPersistentQueue(partition);
+            
+            res.json({
+                success: true,
+                partition: partition,
+                message: `Recovery triggered for partition ${partition}`,
+                result: result
+            });
+        } catch (err) {
+            console.error(`[MANUAL RECOVERY] Error for partition ${partition}:`, err);
+            res.status(500).json({ 
+                success: false, 
+                error: err.message 
+            });
+        }
     }
 };
 

@@ -303,18 +303,19 @@ class db_service {
         let totalRemaining = 0;
 
         for (let partition of [1, 2]) {
-            // Check simulated state first (respect UI toggles)
-            if (db_service.recoveryMonitor.nodeState && !db_service.recoveryMonitor.nodeState[partition]) {
-                console.log(`[Recovery] Partition ${partition}: OFFLINE (simulated) - skipping recovery`);
-                continue;
-            }
-
-            // Check actual health
-            const isHealthy = await db_service.isNodeHealthy(partition, 1000);
+            // NOTE: We don't check simulated NODE_STATE here because:
+            // 1. On serverless (Vercel), NODE_STATE is not shared between instances
+            // 2. The queue already contains writes that need recovery
+            // 3. We only check ACTUAL database health
+            
+            // Check actual health - can we connect to the partition?
+            const isHealthy = await db_service.isNodeHealthy(partition, 2000);
             if (!isHealthy) {
-                console.log(`[Recovery] Partition ${partition}: Still offline`);
+                console.log(`[Recovery] Partition ${partition}: Cannot connect - skipping`);
                 continue;
             }
+            
+            console.log(`[Recovery] Partition ${partition}: Online - processing queue...`);
 
             // Try persistent queue first (this is the main queue on Vercel)
             const persistentRecovered = await db_service.processPersistentQueue(partition);

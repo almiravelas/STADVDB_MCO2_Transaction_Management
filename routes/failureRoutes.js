@@ -20,4 +20,7 @@ router.get("/monitor/status", failureController.getRecoveryMonitorStatus);
 router.get("/queue/status", failureController.getQueueStatus);
 router.get("/system/health", failureController.getSystemHealth);
 
+// Manual recovery trigger
+router.post("/recover/now", failureController.triggerRecoveryNow);
+
 module.exports = router;
