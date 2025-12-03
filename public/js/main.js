@@ -450,52 +450,59 @@ document.addEventListener('DOMContentLoaded', () => {
             const node2Online = data.node2.status === 'connected';
             const allOnline = node0Online && node1Online && node2Online;
 
+            // Fetch recovery monitor status first
+            const monitorRes = await fetch('/failure/monitor/status');
+            const monitorData = await monitorRes.json();
+            console.log('[updateStats] Monitor data:', monitorData);
+
             const statusCard = document.getElementById('globalStatusCard');
             const statusIcon = document.getElementById('globalStatusIcon');
             const statusText = document.getElementById('globalStatusText');
             const statusDesc = document.getElementById('globalStatusDesc');
 
-            if (allOnline && totalQueue === 0) {
-                // All good
-                statusCard.style.background = 'linear-gradient(135deg, #E2FBD7 0%, #d4f5c9 100%)';
-                statusCard.style.borderColor = '#34B53A';
-                statusIcon.style.background = '#34B53A';
-                statusIcon.innerHTML = "<i class='bx bx-check-circle' style='font-size:30px; color:white;'></i>";
-                statusText.innerText = 'All Systems Operational';
-                statusDesc.innerText = 'All nodes connected. No pending recovery operations.';
-            } else if (!allOnline && totalQueue > 0) {
-                // Nodes down with pending writes
-                statusCard.style.background = 'linear-gradient(135deg, #FFE5E5 0%, #ffd6d6 100%)';
-                statusCard.style.borderColor = '#FF4C4C';
-                statusIcon.style.background = '#FF4C4C';
-                statusIcon.innerHTML = "<i class='bx bx-error-circle' style='font-size:30px; color:white;'></i>";
-                statusText.innerText = 'Failure Detected - Recovery In Progress';
-                const offlineNodes = [];
-                if (!node0Online) offlineNodes.push('Central');
-                if (!node1Online) offlineNodes.push('Partition 1');
-                if (!node2Online) offlineNodes.push('Partition 2');
-                statusDesc.innerText = `${offlineNodes.join(', ')} offline. ${totalQueue} write(s) queued for recovery.`;
+            // Determine the SINGLE current state (priority order)
+            let currentState = 'HEALTHY';
+            let stateMessage = '';
+            let stateDesc = '';
+            
+            const offlineNodes = [];
+            if (!node0Online) offlineNodes.push('Central');
+            if (!node1Online) offlineNodes.push('Partition 1');
+            if (!node2Online) offlineNodes.push('Partition 2');
+
+            if (!allOnline && totalQueue > 0) {
+                currentState = 'FAILURE_WITH_QUEUE';
+                stateMessage = 'Failure Detected - Writes Queued';
+                stateDesc = `${offlineNodes.join(', ')} offline. ${totalQueue} write(s) queued for recovery.`;
             } else if (!allOnline) {
-                // Nodes down but no pending writes
-                statusCard.style.background = 'linear-gradient(135deg, #FFF3E0 0%, #ffe8cc 100%)';
-                statusCard.style.borderColor = '#FFA500';
-                statusIcon.style.background = '#FFA500';
-                statusIcon.innerHTML = "<i class='bx bx-error' style='font-size:30px; color:white;'></i>";
-                statusText.innerText = 'Degraded Mode';
-                const offlineNodes = [];
-                if (!node0Online) offlineNodes.push('Central');
-                if (!node1Online) offlineNodes.push('Partition 1');
-                if (!node2Online) offlineNodes.push('Partition 2');
-                statusDesc.innerText = `${offlineNodes.join(', ')} offline. System operating in degraded mode.`;
+                currentState = 'DEGRADED';
+                stateMessage = 'Degraded Mode';
+                stateDesc = `${offlineNodes.join(', ')} offline. System operating in degraded mode.`;
             } else if (totalQueue > 0) {
-                // All online but still recovering
-                statusCard.style.background = 'linear-gradient(135deg, #E3F2FD 0%, #d0e8fc 100%)';
-                statusCard.style.borderColor = '#2196F3';
-                statusIcon.style.background = '#2196F3';
-                statusIcon.innerHTML = "<i class='bx bx-loader-alt bx-spin' style='font-size:30px; color:white;'></i>";
-                statusText.innerText = 'Recovery In Progress';
-                statusDesc.innerText = `All nodes online. Processing ${totalQueue} queued write(s)...`;
+                currentState = 'RECOVERING';
+                stateMessage = 'Recovery In Progress';
+                stateDesc = `All nodes online. Processing ${totalQueue} queued write(s)...`;
+            } else {
+                currentState = 'HEALTHY';
+                stateMessage = 'All Systems Operational';
+                stateDesc = 'All nodes connected. No pending recovery operations.';
             }
+
+            // Apply the state styling (only one state at a time)
+            const stateStyles = {
+                'HEALTHY': { bg: 'linear-gradient(135deg, #E2FBD7 0%, #d4f5c9 100%)', border: '#34B53A', iconBg: '#34B53A', icon: 'bx-check-circle' },
+                'DEGRADED': { bg: 'linear-gradient(135deg, #FFF3E0 0%, #ffe8cc 100%)', border: '#FFA500', iconBg: '#FFA500', icon: 'bx-error' },
+                'FAILURE_WITH_QUEUE': { bg: 'linear-gradient(135deg, #FFE5E5 0%, #ffd6d6 100%)', border: '#FF4C4C', iconBg: '#FF4C4C', icon: 'bx-error-circle' },
+                'RECOVERING': { bg: 'linear-gradient(135deg, #E3F2FD 0%, #d0e8fc 100%)', border: '#2196F3', iconBg: '#2196F3', icon: 'bx-loader-alt bx-spin' }
+            };
+            
+            const style = stateStyles[currentState];
+            statusCard.style.background = style.bg;
+            statusCard.style.borderColor = style.border;
+            statusIcon.style.background = style.iconBg;
+            statusIcon.innerHTML = `<i class='bx ${style.icon}' style='font-size:30px; color:white;'></i>`;
+            statusText.innerText = stateMessage;
+            statusDesc.innerText = stateDesc;
 
             // Update Pending Writes Section
             const pendingSection = document.getElementById('pendingWritesSection');
@@ -520,10 +527,6 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 pendingSection.style.display = 'none';
             }
-
-            // Fetch recovery monitor status
-            const monitorRes = await fetch('/failure/monitor/status');
-            const monitorData = await monitorRes.json();
             
             // Update last check time
             const lastCheck = document.getElementById('lastCheckTime');
@@ -545,54 +548,63 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // Add to recovery log based on last result
-            if (monitorData.lastResult) {
-                addRecoveryLog(allOnline, totalQueue, node0Online, node1Online, node2Online, monitorData.lastResult);
-            } else if (totalQueue > 0 || !allOnline) {
-                addRecoveryLog(allOnline, totalQueue, node0Online, node1Online, node2Online, null);
-            }
+            // Update recovery log with current state and monitor result
+            updateRecoveryLog(currentState, totalQueue, offlineNodes, monitorData);
 
         } catch(e) { 
             console.error('[updateStats] Error:', e);
         }
     };
 
-    // Recovery Log Helper
+    // Recovery Log - tracks state changes sequentially
     const recoveryLogEntries = [];
-    let lastLogMessage = '';
+    let lastState = null;
+    let lastQueueCount = null;
     
-    function addRecoveryLog(allOnline, totalQueue, n0, n1, n2, lastResult) {
+    function updateRecoveryLog(state, queueCount, offlineNodes, monitorData) {
         const log = document.getElementById('recoveryLog');
         if (!log) return;
         
         const time = new Date().toLocaleTimeString();
+        
+        // Only log when something changes
+        const stateChanged = state !== lastState;
+        const queueChanged = queueCount !== lastQueueCount;
+        
+        if (!stateChanged && !queueChanged) return;
+        
         let msg = '';
         
-        // Show recovery success/progress from monitor
-        if (lastResult && lastResult.message) {
-            msg = `[${time}] ${lastResult.message}`;
-        } else if (!allOnline) {
-            const offline = [];
-            if (!n0) offline.push('Central');
-            if (!n1) offline.push('P1');
-            if (!n2) offline.push('P2');
-            msg = `[${time}] ⚠️ Node(s) offline: ${offline.join(', ')}`;
-            if (totalQueue > 0) {
-                msg += ` | Queue: ${totalQueue}`;
+        // State transition messages
+        if (stateChanged) {
+            if (state === 'HEALTHY' && lastState !== null) {
+                msg = `[${time}] ✅ RECOVERY COMPLETE - All systems operational`;
+            } else if (state === 'FAILURE_WITH_QUEUE') {
+                msg = `[${time}] 🔴 FAILURE - ${offlineNodes.join(', ')} offline, ${queueCount} write(s) queued`;
+            } else if (state === 'DEGRADED') {
+                msg = `[${time}] 🟠 DEGRADED - ${offlineNodes.join(', ')} offline`;
+            } else if (state === 'RECOVERING') {
+                msg = `[${time}] 🔵 RECOVERING - Processing ${queueCount} queued write(s)`;
+            } else if (state === 'HEALTHY') {
+                msg = `[${time}] 🟢 HEALTHY - All systems operational`;
             }
-        } else if (totalQueue > 0) {
-            msg = `[${time}] 🔄 Queue: ${totalQueue} pending`;
-        } else {
-            msg = `[${time}] ✓ All systems operational`;
+        } else if (queueChanged && state === 'RECOVERING') {
+            // Queue count changed during recovery
+            if (queueCount === 0) {
+                msg = `[${time}] ✅ RECOVERY COMPLETE - All writes processed`;
+            } else if (queueCount < lastQueueCount) {
+                msg = `[${time}] 🔄 PROGRESS - ${lastQueueCount - queueCount} write(s) recovered, ${queueCount} remaining`;
+            }
         }
         
-        // Only add if message changed
-        if (msg && msg !== lastLogMessage) {
-            lastLogMessage = msg;
+        if (msg) {
             recoveryLogEntries.unshift(msg);
             if (recoveryLogEntries.length > 20) recoveryLogEntries.pop();
-            log.innerHTML = recoveryLogEntries.map(e => `<div style="padding:3px 0; border-bottom:1px solid #e8ecf4;">${e}</div>`).join('');
+            log.innerHTML = recoveryLogEntries.map(e => `<div style="padding:5px 0; border-bottom:1px solid #e8ecf4;">${e}</div>`).join('');
         }
+        
+        lastState = state;
+        lastQueueCount = queueCount;
     }
 
     // HISTORY HELPER
