@@ -356,8 +356,8 @@ app.get('/api/node/:id/data', async (req, res) => {
     }
     
     // Debugging SQL
-    // Added ORDER BY id to ensure deterministic pagination
-    const sql = `SELECT * FROM ${tableName} ORDER BY id LIMIT ${limit} OFFSET ${offset}`;
+    // ORDER BY id DESC to show newest users first
+    const sql = `SELECT * FROM ${tableName} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`;
     console.log(`[API] Executing SQL: ${sql}`);
     
     // Using interpolation for LIMIT/OFFSET to avoid prepared statement issues with some MySQL versions/drivers
