@@ -8,11 +8,14 @@ let NODE_STATE = {
     2: true    // partition 2
 };
 
-// Export NODE_STATE so other modules can access it
-module.exports.getNodeState = () => NODE_STATE;
+const failureController = {
+    // Function to get NODE_STATE directly (not a route handler)
+    getNodeState() {
+        return NODE_STATE;
+    },
 
-module.exports = {
-    getNodeState(req, res) {
+    // Route handler to get node state
+    getNodeStateHandler(req, res) {
         return res.json({ NODE_STATE });
     },
 
@@ -173,3 +176,5 @@ module.exports = {
         }
     }
 };
+
+module.exports = failureController;
