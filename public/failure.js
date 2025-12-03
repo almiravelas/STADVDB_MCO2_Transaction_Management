@@ -50,8 +50,6 @@ async function toggleNode(id, btn) {
     // Refresh queue status
     await refreshQueueStatus();
 }
-    await refreshQueueStatus();
-}
 
 async function nodeOff(id) {
     const res = await fetch(`/failure/node/${id}/off`, { method: "POST" });
