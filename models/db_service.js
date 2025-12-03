@@ -598,14 +598,26 @@ class db_service {
         const centralPool = db_router.getCentralNode();
         const partitionPool = db_router.getPartitionNode(userData.country);
 
+        if (!centralPool) {
+            throw new Error("Central node pool is not configured");
+        }
+
         let centralConn, partitionConn;
 
         try {
             console.log('[DB Service] Getting central connection...');
-            centralConn = await Promise.race([
-                centralPool.getConnection(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Central connection timeout')), 5000))
-            ]);
+            try {
+                centralConn = await Promise.race([
+                    centralPool.getConnection(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Central connection timeout after 5s')), 5000))
+                ]);
+            } catch (connError) {
+                throw new Error(`Failed to connect to Central Node: ${connError.message}`);
+            }
+            
+            if (!centralConn) {
+                throw new Error("Central connection returned undefined");
+            }
             console.log('[DB Service] Central connection acquired');
             
             await centralConn.beginTransaction();
