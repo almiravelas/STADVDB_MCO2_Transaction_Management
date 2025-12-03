@@ -391,6 +391,25 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus('node0Status', data.node0.status);
             updateStatus('node1Status', data.node1.status);
             updateStatus('node2Status', data.node2.status);
+
+            // Fetch and update queue status
+            const queueRes = await fetch('/failure/queue/status');
+            const queueData = await queueRes.json();
+            
+            const updateQueue = (id, count) => {
+                const el = document.getElementById(id);
+                if(el) {
+                    el.innerText = `Queue: ${count}`;
+                    if(count === 0) {
+                        el.style.color = '#34B53A';
+                    } else {
+                        el.style.color = '#FFA500';
+                    }
+                }
+            };
+            updateQueue('node0Queue', queueData.node0 || 0);
+            updateQueue('node1Queue', queueData.node1 || 0);
+            updateQueue('node2Queue', queueData.node2 || 0);
         } catch(e) {}
     };
 
