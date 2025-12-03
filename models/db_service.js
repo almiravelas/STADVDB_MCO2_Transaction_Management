@@ -657,11 +657,41 @@ class db_service {
             }
 
             console.log('[DB Service] Getting partition connection...');
-            partitionConn = await Promise.race([
-                partitionPool.getConnection(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Partition connection timeout')), 5000))
-            ]);
-            console.log('[DB Service] Partition connection acquired');
+            try {
+                partitionConn = await Promise.race([
+                    partitionPool.getConnection(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Partition connection timeout')), 3000))
+                ]);
+                console.log('[DB Service] Partition connection acquired');
+            } catch (connError) {
+                console.error(`[DB Service] Failed to connect to partition ${partitionId}:`, connError.message);
+                
+                // REAL FAILURE DETECTED - Queue the write
+                console.log('[DB Service] Committing to central only...');
+                await db_access.insertUser(centralConn, fullData);
+                await centralConn.commit();
+                console.log('[DB Service] Central commit successful');
+                
+                // Queue the write for partition
+                const writeOp = {
+                    query: 'INSERT INTO users (id, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    params: [fullData.id, fullData.firstname, fullData.lastname, fullData.city, fullData.country, fullData.createdAt, fullData.updatedAt],
+                    timestamp: new Date(),
+                    attemptCount: 0,
+                    lastError: connError.message
+                };
+                db_service.missedWrites[partitionId].push(writeOp);
+                console.log(`[DB Service] Write queued for partition ${partitionId} due to connection failure. Queue size: ${db_service.missedWrites[partitionId].length}`);
+                
+                return {
+                    success: true,
+                    id: newId,
+                    message: `User created with ID ${newId}. Partition ${partitionId} connection failed - write queued.`,
+                    queuedForPartition: partitionId,
+                    queueSize: db_service.missedWrites[partitionId].length,
+                    reason: 'REAL_CONNECTION_FAILURE'
+                };
+            }
             
             await partitionConn.beginTransaction();
             console.log('[DB Service] Transaction started on partition');
