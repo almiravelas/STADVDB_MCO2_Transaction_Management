@@ -1,5 +1,12 @@
 const logBox = document.getElementById("failureLog");
 
+// Client-side node state (required for serverless where server state doesn't persist)
+let CLIENT_NODE_STATE = {
+    0: true,   // Master
+    1: true,   // Slave 1
+    2: true    // Slave 2
+};
+
 function appendLog(msg) {
     logBox.textContent += msg + "\n";
     logBox.scrollTop = logBox.scrollHeight;
@@ -9,30 +16,40 @@ function clearLog() {
     logBox.textContent = "Log cleared.\n";
 }
 
+// Get current node state to send with requests
+function getNodeStatePayload() {
+    return { NODE_STATE: CLIENT_NODE_STATE };
+}
+
 async function toggleNode(id, btn) {
     // Get the status element
     const statusEl = document.getElementById(`node${id+1}-status`);
     
-    // Determine current state
-    const isOnline = statusEl.textContent.trim() === "ONLINE";
+    // Toggle the CLIENT state
+    CLIENT_NODE_STATE[id] = !CLIENT_NODE_STATE[id];
+    const isNowOnline = CLIENT_NODE_STATE[id];
     
-    if (isOnline) {
-        // Turn node OFF
-        const res = await fetch(`/failure/node/${id}/off`, { method: "POST" });
-        const data = await res.json();
-        appendLog(data.message);
-        statusEl.textContent = "OFFLINE";
-        statusEl.style.color = "#FF4C4C";
-    } else {
-        // Turn node ON
-        const res = await fetch(`/failure/node/${id}/on`, { method: "POST" });
-        const data = await res.json();
-        appendLog(data.message);
+    // Update UI
+    if (isNowOnline) {
         statusEl.textContent = "ONLINE";
         statusEl.style.color = "#34B53A";
+        appendLog(`Node ${id} (${id === 0 ? 'Master' : 'Slave ' + id}) is now ONLINE.`);
+    } else {
+        statusEl.textContent = "OFFLINE";
+        statusEl.style.color = "#FF4C4C";
+        appendLog(`Node ${id} (${id === 0 ? 'Master' : 'Slave ' + id}) is now OFFLINE.`);
+    }
+    
+    // Also notify server (for consistency, though server state may not persist)
+    try {
+        await fetch(`/failure/node/${id}/${isNowOnline ? 'on' : 'off'}`, { method: "POST" });
+    } catch (e) {
+        console.warn('Failed to sync node state with server:', e);
     }
     
     // Refresh queue status
+    await refreshQueueStatus();
+}
     await refreshQueueStatus();
 }
 
@@ -58,7 +75,12 @@ async function runCase1() {
     appendLog("\n╔══════════════════════════════════════╗");
     appendLog("║         Running Case #1              ║");
     appendLog("╚══════════════════════════════════════╝");
-    const res = await fetch(`/failure/case1`, { method: "POST" });
+    appendLog(`[Node State: Master=${CLIENT_NODE_STATE[0]?'ON':'OFF'}, S1=${CLIENT_NODE_STATE[1]?'ON':'OFF'}, S2=${CLIENT_NODE_STATE[2]?'ON':'OFF'}]`);
+    const res = await fetch(`/failure/case1`, { 
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getNodeStatePayload())
+    });
     const data = await res.json();
     data.logs.forEach(appendLog);
     await refreshQueueStatus();
@@ -68,7 +90,12 @@ async function runCase2() {
     appendLog("\n╔══════════════════════════════════════╗");
     appendLog("║         Running Case #2              ║");
     appendLog("╚══════════════════════════════════════╝");
-    const res = await fetch(`/failure/case2`, { method: "POST" });
+    appendLog(`[Node State: Master=${CLIENT_NODE_STATE[0]?'ON':'OFF'}, S1=${CLIENT_NODE_STATE[1]?'ON':'OFF'}, S2=${CLIENT_NODE_STATE[2]?'ON':'OFF'}]`);
+    const res = await fetch(`/failure/case2`, { 
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getNodeStatePayload())
+    });
     const data = await res.json();
     data.logs.forEach(appendLog);
     await refreshQueueStatus();
@@ -78,7 +105,12 @@ async function runCase3() {
     appendLog("\n╔══════════════════════════════════════╗");
     appendLog("║         Running Case #3              ║");
     appendLog("╚══════════════════════════════════════╝");
-    const res = await fetch(`/failure/case3`, { method: "POST" });
+    appendLog(`[Node State: Master=${CLIENT_NODE_STATE[0]?'ON':'OFF'}, S1=${CLIENT_NODE_STATE[1]?'ON':'OFF'}, S2=${CLIENT_NODE_STATE[2]?'ON':'OFF'}]`);
+    const res = await fetch(`/failure/case3`, { 
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getNodeStatePayload())
+    });
     const data = await res.json();
     data.logs.forEach(appendLog);
     
@@ -96,7 +128,12 @@ async function runCase4() {
     appendLog("\n╔══════════════════════════════════════╗");
     appendLog("║         Running Case #4              ║");
     appendLog("╚══════════════════════════════════════╝");
-    const res = await fetch(`/failure/case4`, { method: "POST" });
+    appendLog(`[Node State: Master=${CLIENT_NODE_STATE[0]?'ON':'OFF'}, S1=${CLIENT_NODE_STATE[1]?'ON':'OFF'}, S2=${CLIENT_NODE_STATE[2]?'ON':'OFF'}]`);
+    const res = await fetch(`/failure/case4`, { 
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getNodeStatePayload())
+    });
     const data = await res.json();
     data.logs.forEach(appendLog);
     

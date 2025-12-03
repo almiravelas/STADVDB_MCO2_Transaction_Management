@@ -1,12 +1,25 @@
 const db_service = require("../models/db_service.js");
 const db_router = require("../models/db_router.js");
 
-// Keep track of node states
+// Keep track of node states (for non-serverless environments)
+// NOTE: On Vercel serverless, this state doesn't persist between requests.
+// The client tracks node state and sends it with each request.
 let NODE_STATE = {
-    0: true,   // central node
-    1: true,   // partition 1
-    2: true    // partition 2
+    0: true,   // central node (Master)
+    1: true,   // partition 1 (Slave 1)
+    2: true    // partition 2 (Slave 2)
 };
+
+// Helper to get NODE_STATE from request body (client-side tracking for serverless)
+// Falls back to server-side state if not provided
+function getNodeStateFromRequest(req) {
+    if (req.body && req.body.NODE_STATE) {
+        console.log('[Node State] Using client-provided state:', JSON.stringify(req.body.NODE_STATE));
+        return req.body.NODE_STATE;
+    }
+    console.log('[Node State] Using server-side state:', JSON.stringify(NODE_STATE));
+    return NODE_STATE;
+}
 
 const failureController = {
     // Function to get NODE_STATE directly (not a route handler)
@@ -22,12 +35,14 @@ const failureController = {
     nodeOff(req, res) {
         const id = req.params.id;
         NODE_STATE[id] = false;
+        console.log(`[Node State] Node ${id} set to OFFLINE (server-side)`);
         return res.json({ success: true, message: `Node ${id} is now OFFLINE.`, NODE_STATE });
     },
 
     nodeOn(req, res) {
         const id = req.params.id;
         NODE_STATE[id] = true;
+        console.log(`[Node State] Node ${id} set to ONLINE (server-side)`);
         return res.json({ success: true, message: `Node ${id} is now ONLINE.`, NODE_STATE });
     },
 
@@ -36,7 +51,8 @@ const failureController = {
     // =====================================================
     async testCase1(req, res) {
         try {
-            const result = await db_service.testCase1(NODE_STATE);
+            const nodeState = getNodeStateFromRequest(req);
+            const result = await db_service.testCase1(nodeState);
             res.json(result);
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
@@ -48,7 +64,8 @@ const failureController = {
     // =====================================================
     async testCase2(req, res) {
         try {
-            const result = await db_service.testCase2(NODE_STATE);
+            const nodeState = getNodeStateFromRequest(req);
+            const result = await db_service.testCase2(nodeState);
             res.json(result);
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
@@ -60,7 +77,8 @@ const failureController = {
     // =====================================================
     async testCase3(req, res) {
         try {
-            const result = await db_service.testCase3(NODE_STATE);
+            const nodeState = getNodeStateFromRequest(req);
+            const result = await db_service.testCase3(nodeState);
             res.json(result);
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
@@ -72,7 +90,8 @@ const failureController = {
     // =====================================================
     async testCase4(req, res) {
         try {
-            const result = await db_service.testCase4(NODE_STATE);
+            const nodeState = getNodeStateFromRequest(req);
+            const result = await db_service.testCase4(nodeState);
             res.json(result);
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
@@ -84,7 +103,8 @@ const failureController = {
     // =====================================================
     startRecoveryMonitor(req, res) {
         const intervalMs = (req.body && req.body.intervalMs) || 30000; // Default 30 seconds
-        const result = db_service.startRecoveryMonitor(intervalMs, NODE_STATE);
+        const nodeState = getNodeStateFromRequest(req);
+        const result = db_service.startRecoveryMonitor(intervalMs, nodeState);
         res.json(result);
     },
 
