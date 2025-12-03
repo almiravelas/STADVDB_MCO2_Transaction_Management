@@ -9,8 +9,9 @@ body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #
 .sidebar-logo { display: flex; align-items: center; gap: 15px; margin-bottom: 40px; padding: 0 10px; font-weight: 800; font-size: 22px; color: #fff; }
 .toggle-btn { position: absolute; right: -15px; top: 25px; background: #fff; border: none; width: 30px; height: 30px; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.1); cursor: pointer; color: #7C3AED; display: flex; align-items: center; justify-content: center; }
 .nav-item { display: flex; align-items: center; gap: 15px; width: 100%; padding: 15px; background: none; border: none; border-radius: 15px; color: rgba(255,255,255,0.7); font-size: 15px; cursor: pointer; transition: 0.2s; text-align: left; margin-bottom: 5px; }
-.nav-item:hover { color: #fff; background: rgba(255,255,255,0.1); }
-.nav-item.active { background: rgba(255,255,255,0.2); color: white; box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1); }
+.nav-item:hover { color: #fff; background: rgba(255,255,255,0.15); }
+.nav-item.active { background: #fff; color: #7C3AED; box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1); }
+.nav-item.active i { color: #7C3AED; }
 .nav-item i { font-size: 20px; min-width: 20px; }
 
 /* --- MAIN CONTENT --- */
