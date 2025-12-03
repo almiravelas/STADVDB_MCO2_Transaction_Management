@@ -2100,18 +2100,26 @@ class db_service {
         logs.push(`Total Attempted: ${overallStats.totalAttempted} | Success: ${overallStats.totalSuccess} | Failed: ${overallStats.totalFailed}`);
         logs.push("");
         
-        logs.push("📦 Current Queue Status:");
-        logs.push(`   Partition 1: ${db_service.missedWrites[1].length} pending`);
-        logs.push(`   Partition 2: ${db_service.missedWrites[2].length} pending`);
+        // Get FRESH persistent queue status for final summary
+        let finalQueueStatus = { 1: 0, 2: 0 };
+        try {
+            finalQueueStatus = await db_service.getPersistentQueueStatus();
+        } catch (e) {
+            console.error('[Case4] Error getting final queue status:', e.message);
+        }
+        
+        logs.push("📦 Current Queue Status (Persistent):");
+        logs.push(`   Slave 1: ${finalQueueStatus[1] || 0} pending`);
+        logs.push(`   Slave 2: ${finalQueueStatus[2] || 0} pending`);
         logs.push("");
 
-        const allSynced = db_service.missedWrites[1].length === 0 && db_service.missedWrites[2].length === 0;
+        const allSynced = (finalQueueStatus[1] || 0) === 0 && (finalQueueStatus[2] || 0) === 0;
         if (allSynced) {
-            logs.push("✅ SYSTEM STATUS: All partitions synchronized");
+            logs.push("✅ SYSTEM STATUS: All Slaves synchronized with Master");
             logs.push("✅ Eventual consistency achieved!");
         } else {
             logs.push("⚠️  SYSTEM STATUS: Recovery incomplete");
-            logs.push("💡 Next Steps: Wait for background monitor or run Case #4 again");
+            logs.push("💡 Next Steps: Toggle offline nodes back ON, then run Case #4 again");
         }
         logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
@@ -2120,8 +2128,8 @@ class db_service {
             logs,
             stats: overallStats,
             queueSizes: {
-                partition1: db_service.missedWrites[1].length,
-                partition2: db_service.missedWrites[2].length
+                partition1: finalQueueStatus[1] || 0,
+                partition2: finalQueueStatus[2] || 0
             },
             fullyRecovered: allSynced
         };
