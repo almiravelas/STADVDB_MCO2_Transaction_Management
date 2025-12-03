@@ -503,4 +503,9 @@ app.listen(PORT, () => {
   console.log('  GET /api/users/search - Search User');
   console.log('  PUT /api/users/:id - Update User');
   console.log('  DELETE /api/users/:id - Delete User\n');
+  
+  // Auto-start recovery monitor with 10-second interval
+  const NODE_STATE = failureController.getNodeState();
+  db_service.startRecoveryMonitor(10000, NODE_STATE);
+  console.log('✓ Background Recovery Monitor started (10s interval)\n');
 });
