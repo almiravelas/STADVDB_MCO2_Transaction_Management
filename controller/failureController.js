@@ -67,5 +67,102 @@ module.exports = {
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
         }
+    },
+
+    // =====================================================
+    // Recovery Monitor Controls
+    // =====================================================
+    startRecoveryMonitor(req, res) {
+        const intervalMs = (req.body && req.body.intervalMs) || 30000; // Default 30 seconds
+        const result = db_service.startRecoveryMonitor(intervalMs, NODE_STATE);
+        res.json(result);
+    },
+
+    stopRecoveryMonitor(req, res) {
+        const result = db_service.stopRecoveryMonitor();
+        res.json(result);
+    },
+
+    getRecoveryMonitorStatus(req, res) {
+        const status = db_service.getRecoveryMonitorStatus();
+        res.json(status);
+    },
+
+    getQueueStatus(req, res) {
+        const status = {
+            central: db_service.missedWrites[0].length,
+            partition1: db_service.missedWrites[1].length,
+            partition2: db_service.missedWrites[2].length,
+            total: db_service.missedWrites[0].length + 
+                   db_service.missedWrites[1].length + 
+                   db_service.missedWrites[2].length,
+            details: {
+                central: db_service.missedWrites[0].map(w => ({
+                    user: `${w.params[0]} ${w.params[1]}`,
+                    country: w.params[3],
+                    attempts: w.attemptCount,
+                    lastError: w.lastError
+                })),
+                partition1: db_service.missedWrites[1].map(w => ({
+                    user: `${w.params[0]} ${w.params[1]}`,
+                    country: w.params[3],
+                    attempts: w.attemptCount,
+                    lastError: w.lastError
+                })),
+                partition2: db_service.missedWrites[2].map(w => ({
+                    user: `${w.params[0]} ${w.params[1]}`,
+                    country: w.params[3],
+                    attempts: w.attemptCount,
+                    lastError: w.lastError
+                }))
+            }
+        };
+        res.json(status);
+    },
+
+    async getSystemHealth(req, res) {
+        try {
+            const health = {
+                timestamp: new Date().toISOString(),
+                nodes: {},
+                queues: {
+                    central: db_service.missedWrites[0].length,
+                    partition1: db_service.missedWrites[1].length,
+                    partition2: db_service.missedWrites[2].length
+                },
+                monitor: db_service.getRecoveryMonitorStatus(),
+                overall: 'HEALTHY'
+            };
+
+            // Check health of each node
+            for (let nodeId of [0, 1, 2]) {
+                const isHealthy = await db_service.isNodeHealthy(nodeId, 1000);
+                health.nodes[`node${nodeId}`] = {
+                    id: nodeId,
+                    name: nodeId === 0 ? 'Central' : `Partition ${nodeId}`,
+                    status: isHealthy ? 'ONLINE' : 'OFFLINE',
+                    healthy: isHealthy,
+                    queueSize: db_service.missedWrites[nodeId].length
+                };
+            }
+
+            // Determine overall system health
+            const allNodesHealthy = Object.values(health.nodes).every(n => n.healthy);
+            const hasQueuedWrites = health.queues.central > 0 || 
+                                    health.queues.partition1 > 0 || 
+                                    health.queues.partition2 > 0;
+
+            if (!allNodesHealthy && hasQueuedWrites) {
+                health.overall = 'DEGRADED';
+            } else if (!allNodesHealthy) {
+                health.overall = 'PARTIAL';
+            } else if (hasQueuedWrites) {
+                health.overall = 'RECOVERING';
+            }
+
+            res.json(health);
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
     }
 };

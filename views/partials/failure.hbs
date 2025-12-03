@@ -3,63 +3,129 @@
             <div class="card-clean">
                 <h2 style="margin:0;">Failure Recovery Simulator</h2>
                 <p style="color:#A3AED0; font-size:13px; margin:5px 0 20px 0;">Simulate node failures, recovery, and replica synchronization.</p>
+            
             <!-- NODE CONTROLS -->
             <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:20px; margin-top:20px;">
             
-                <!-- Node 1 -->
+                <!-- Node 0 (Central) -->
                 <div class="card-clean" style="text-align:center;">
-                    <h3>Node 1</h3>
+                    <h3>Central Node (0)</h3>
                     <p id="node1-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <p style="font-size:12px; color:#A3AED0; margin-top:5px;">Master Database</p>
+                    <div id="node0-queue" style="font-size:11px; color:#FFA500; margin-top:5px;">Queue: 0</div>
                     <button class="btn-primary" onclick="toggleNode(0, this)"><i class='bx bx-power-off'></i> Toggle</button>
                 </div>
 
-                <!-- Node 2 -->
+                <!-- Node 1 (Partition 1) -->
                 <div class="card-clean" style="text-align:center;">
-                    <h3>Node 2</h3>
+                    <h3>Partition 1 (Node 1)</h3>
                     <p id="node2-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <p style="font-size:12px; color:#A3AED0; margin-top:5px;">Countries M-Z</p>
+                    <div id="node1-queue" style="font-size:11px; color:#FFA500; margin-top:5px;">Queue: 0</div>
                     <button class="btn-primary" onclick="toggleNode(1, this)"><i class='bx bx-power-off'></i> Toggle</button>
                 </div>
 
-                <!-- Node 3 -->
+                <!-- Node 2 (Partition 2) -->
                 <div class="card-clean" style="text-align:center;">
-                    <h3>Node 3</h3>
+                    <h3>Partition 2 (Node 2)</h3>
                     <p id="node3-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
+                    <p style="font-size:12px; color:#A3AED0; margin-top:5px;">Countries A-L</p>
+                    <div id="node2-queue" style="font-size:11px; color:#FFA500; margin-top:5px;">Queue: 0</div>
                     <button class="btn-primary" onclick="toggleNode(2, this)"><i class='bx bx-power-off'></i> Toggle</button>
                 </div>
             </div>
 
-            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-top:20px;">
+            <!-- RECOVERY MONITOR -->
+            <div class="card-clean" style="margin-top:20px; padding:15px; border-left: 4px solid #4318FF;">
+                <h3 style="margin:0;">Background Recovery Monitor</h3>
+                <p style="color:#A3AED0; font-size:12px; margin:5px 0;">Automatically recovers failed nodes when they come back online</p>
+                <div style="display:flex; gap:10px; align-items:center; margin-top:10px;">
+                    <button class="btn-primary" onclick="startMonitor()">
+                        <i class='bx bx-play'></i> Start Monitor
+                    </button>
+                    <button class="btn-primary" onclick="stopMonitor()" style="background:#FF4C4C;">
+                        <i class='bx bx-stop'></i> Stop Monitor
+                    </button>
+                    <button class="btn-primary" onclick="refreshMonitorStatus()" style="background:#FFA500;">
+                        <i class='bx bx-refresh'></i> Refresh Status
+                    </button>
+                    <div id="monitor-status" style="margin-left:auto; font-size:13px; color:#A3AED0;">
+                        Status: <span id="monitor-enabled" style="color:#FF4C4C;">STOPPED</span>
+                    </div>
+                </div>
+                <div id="monitor-details" style="margin-top:10px; font-size:12px; color:#A3AED0; display:none;">
+                    <div>Last Check: <span id="monitor-lastcheck">Never</span></div>
+                    <div>Total Checks: <span id="monitor-totalchecks">0</span></div>
+                    <div>Total Recoveries: <span id="monitor-totalrecoveries">0</span></div>
+                    <div>Check Interval: <span id="monitor-interval">30000ms</span></div>
+                </div>
+            </div>
+
+            <!-- TEST CASES -->
+            <h3 style="margin-top:30px;">Replication & Recovery Test Cases</h3>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-top:15px;">
             
                 <!-- Case 1 -->
-                <div class="card-clean" style="text-align:center;">
-                    <h3>Case 1</h3>
-                    <p id="node1-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
-                    <button class="btn-primary" onclick="runCase1()"><i class='bx bx-power-off'></i> Run</button>
+                <div class="card-clean" style="text-align:center; padding:15px;">
+                    <h4 style="margin:0 0 5px 0;">Case #1</h4>
+                    <p style="font-size:11px; color:#A3AED0; height:40px;">Partition → Central replication fails</p>
+                    <button class="btn-primary" onclick="runCase1()" style="width:100%;">
+                        <i class='bx bx-play-circle'></i> Run
+                    </button>
                 </div>
 
                 <!-- Case 2 -->
-                <div class="card-clean" style="text-align:center;">
-                    <h3>Case 2</h3>
-                    <p id="node2-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
-                    <button class="btn-primary" onclick="runCase2()"><i class='bx bx-power-off'></i> Run</button>
+                <div class="card-clean" style="text-align:center; padding:15px;">
+                    <h4 style="margin:0 0 5px 0;">Case #2</h4>
+                    <p style="font-size:11px; color:#A3AED0; height:40px;">Central recovers after missed writes</p>
+                    <button class="btn-primary" onclick="runCase2()" style="width:100%;">
+                        <i class='bx bx-play-circle'></i> Run
+                    </button>
                 </div>
 
                 <!-- Case 3 -->
-                <div class="card-clean" style="text-align:center;">
-                    <h3>Case 3</h3>
-                    <p id="node3-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
-                    <button class="btn-primary" onclick="runCase3()"><i class='bx bx-power-off'></i> Run</button>
+                <div class="card-clean" style="text-align:center; padding:15px; border: 2px solid #4318FF;">
+                    <h4 style="margin:0 0 5px 0; color:#4318FF;">Case #3</h4>
+                    <p style="font-size:11px; color:#A3AED0; height:40px;">Central → Partition replication fails</p>
+                    <button class="btn-primary" onclick="runCase3()" style="width:100%; background:#4318FF;">
+                        <i class='bx bx-play-circle'></i> Run
+                    </button>
                 </div>
 
                 <!-- Case 4 -->
-                <div class="card-clean" style="text-align:center;">
-                    <h3>Case 4</h3>
-                    <p id="node3-status" style="font-size:14px; color:#34B53A;">ONLINE</p>
-                    <button class="btn-primary" onclick="runCase4()"><i class='bx bx-power-off'></i> Run</button>
+                <div class="card-clean" style="text-align:center; padding:15px; border: 2px solid #4318FF;">
+                    <h4 style="margin:0 0 5px 0; color:#4318FF;">Case #4</h4>
+                    <p style="font-size:11px; color:#A3AED0; height:40px;">Partition recovers after missed writes</p>
+                    <button class="btn-primary" onclick="runCase4()" style="width:100%; background:#4318FF;">
+                        <i class='bx bx-play-circle'></i> Run
+                    </button>
+                </div>
+            </div>
+
+            <!-- CONCURRENT TRANSACTIONS TEST -->
+            <div class="card-clean" style="margin-top:20px; padding:15px;">
+                <h3 style="margin:0;">Concurrent Transactions During Failure</h3>
+                <p style="color:#A3AED0; font-size:12px; margin:5px 0 10px 0;">Simulate multiple users performing transactions while a node is down</p>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <label style="font-size:13px;">Transaction Count:</label>
+                    <input type="number" id="concurrent-count" value="5" min="1" max="20" style="padding:5px; width:80px; border-radius:5px; border:1px solid #E9EDF7;">
+                    <label style="font-size:13px; margin-left:10px;">Delay (ms):</label>
+                    <input type="number" id="concurrent-delay" value="500" min="0" max="5000" step="100" style="padding:5px; width:80px; border-radius:5px; border:1px solid #E9EDF7;">
+                    <button class="btn-primary" onclick="runConcurrentTest()" style="margin-left:auto;">
+                        <i class='bx bx-refresh'></i> Run Concurrent Test
+                    </button>
                 </div>
             </div>
 
         <h3 style="margin-top:30px;">Event Log</h3>
+        <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <button class="btn-primary" onclick="clearLog()" style="background:#FFA500;">
+                <i class='bx bx-trash'></i> Clear Log
+            </button>
+            <button class="btn-primary" onclick="refreshQueueStatus()" style="background:#34B53A;">
+                <i class='bx bx-refresh'></i> Refresh Queue
+            </button>
+        </div>
         <div class="log-box" id="failureLog">System idle...</div>
     </div>
 </section>

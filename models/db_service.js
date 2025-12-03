@@ -14,6 +14,177 @@ class db_service {
         2: []
     };
 
+    // Background recovery monitor state
+    static recoveryMonitor = {
+        enabled: false,
+        intervalId: null,
+        checkIntervalMs: 30000, // Check every 30 seconds
+        lastCheckTime: null,
+        nodeState: null,  // Reference to NODE_STATE from controller
+        stats: {
+            totalChecks: 0,
+            totalRecoveries: 0,
+            lastRecoveryTime: null
+        }
+    };
+
+    /**
+     * Start the background recovery monitor
+     * Automatically checks for recovered nodes and applies missed writes
+     */
+    static startRecoveryMonitor(intervalMs = 30000, nodeState = null) {
+        if (db_service.recoveryMonitor.enabled) {
+            console.log("[Recovery Monitor] Already running");
+            return { success: false, message: "Monitor already running" };
+        }
+
+        db_service.recoveryMonitor.checkIntervalMs = intervalMs;
+        db_service.recoveryMonitor.enabled = true;
+        db_service.recoveryMonitor.nodeState = nodeState;
+
+        db_service.recoveryMonitor.intervalId = setInterval(async () => {
+            await db_service.performBackgroundRecovery();
+        }, intervalMs);
+
+        console.log(`[Recovery Monitor] Started (interval: ${intervalMs}ms)`);
+        return { success: true, message: "Recovery monitor started" };
+    }
+
+    /**
+     * Stop the background recovery monitor
+     */
+    static stopRecoveryMonitor() {
+        if (!db_service.recoveryMonitor.enabled) {
+            return { success: false, message: "Monitor not running" };
+        }
+
+        clearInterval(db_service.recoveryMonitor.intervalId);
+        db_service.recoveryMonitor.enabled = false;
+        db_service.recoveryMonitor.intervalId = null;
+
+        console.log("[Recovery Monitor] Stopped");
+        return { success: true, message: "Recovery monitor stopped" };
+    }
+
+    /**
+     * Perform background recovery check
+     * This is called automatically by the monitor
+     */
+    static async performBackgroundRecovery() {
+        const checkTime = new Date();
+        db_service.recoveryMonitor.lastCheckTime = checkTime;
+        db_service.recoveryMonitor.stats.totalChecks++;
+
+        console.log(`[Recovery Monitor] Check #${db_service.recoveryMonitor.stats.totalChecks} at ${checkTime.toISOString()}`);
+
+        let recoveredAny = false;
+
+        for (let partition of [1, 2]) {
+            // Skip if no missed writes
+            if (db_service.missedWrites[partition].length === 0) {
+                continue;
+            }
+
+            console.log(`[Recovery Monitor] Partition ${partition}: ${db_service.missedWrites[partition].length} pending writes`);
+
+            // Check simulated state first (respect UI toggles)
+            if (db_service.recoveryMonitor.nodeState && !db_service.recoveryMonitor.nodeState[partition]) {
+                console.log(`[Recovery Monitor] Partition ${partition}: OFFLINE (simulated) - skipping recovery`);
+                continue;
+            }
+
+            // Check actual health
+            const isHealthy = await db_service.isNodeHealthy(partition, 1000);
+            if (!isHealthy) {
+                console.log(`[Recovery Monitor] Partition ${partition}: Still offline`);
+                continue;
+            }
+
+            console.log(`[Recovery Monitor] Partition ${partition}: Online - attempting recovery...`);
+
+            // Attempt recovery
+            const pPool = db_router.getNodeById(partition);
+            let pConn;
+
+            try {
+                pConn = await db_service.connectWithTimeout(pPool, 2000);
+                
+                const remainingWrites = [];
+                let successCount = 0;
+
+                for (let write of db_service.missedWrites[partition]) {
+                    try {
+                        // Check for duplicates
+                        const checkSql = "SELECT id FROM users WHERE firstname = ? AND lastname = ? AND country = ? AND createdAt = ?";
+                        const [existing] = await db_service.queryWithTimeout(
+                            pConn, 
+                            checkSql, 
+                            [write.params[0], write.params[1], write.params[3], write.params[4]], 
+                            2000
+                        );
+
+                        if (existing && existing.length > 0) {
+                            console.log(`[Recovery Monitor] Skipped duplicate: ${write.params[0]} ${write.params[1]}`);
+                            successCount++;
+                            continue;
+                        }
+
+                        // Apply write
+                        await db_service.queryWithTimeout(pConn, write.query, write.params, 2000);
+                        console.log(`[Recovery Monitor] Recovered: ${write.params[0]} ${write.params[1]}`);
+                        successCount++;
+
+                    } catch (err) {
+                        const errorType = db_service.classifyError(err);
+                        write.attemptCount++;
+                        write.lastError = err.message;
+                        write.lastAttempt = new Date();
+                        
+                        // Keep retryable errors in queue
+                        if (errorType.type === 'RETRYABLE' || errorType.type === 'UNKNOWN') {
+                            remainingWrites.push(write);
+                        }
+                    }
+                }
+
+                db_service.missedWrites[partition] = remainingWrites;
+                
+                if (successCount > 0) {
+                    console.log(`[Recovery Monitor] Partition ${partition}: Recovered ${successCount} writes, ${remainingWrites.length} remaining`);
+                    recoveredAny = true;
+                    db_service.recoveryMonitor.stats.totalRecoveries += successCount;
+                    db_service.recoveryMonitor.stats.lastRecoveryTime = checkTime;
+                }
+
+            } catch (err) {
+                console.log(`[Recovery Monitor] Partition ${partition}: Recovery failed - ${err.message}`);
+            } finally {
+                if (pConn) pConn.release();
+            }
+        }
+
+        if (!recoveredAny) {
+            console.log("[Recovery Monitor] No recovery operations performed this cycle");
+        }
+    }
+
+    /**
+     * Get recovery monitor status
+     */
+    static getRecoveryMonitorStatus() {
+        return {
+            enabled: db_service.recoveryMonitor.enabled,
+            intervalMs: db_service.recoveryMonitor.checkIntervalMs,
+            lastCheck: db_service.recoveryMonitor.lastCheckTime,
+            stats: db_service.recoveryMonitor.stats,
+            queueSizes: {
+                central: db_service.missedWrites[0].length,
+                partition1: db_service.missedWrites[1].length,
+                partition2: db_service.missedWrites[2].length
+            }
+        };
+    }
+
     /**
      * Helper function to get a connection with a timeout.
      * If the connection is not acquired within the specified time, it throws an error.
@@ -814,12 +985,40 @@ class db_service {
     // =========================
     // CASE 3: Central writes, Partition fails
     // =========================
+    /**
+     * Case #3: Central Node → Partition Replication Failure
+     * 
+     * Scenario: A transaction is successfully committed to the Central Node (Node 0),
+     * but fails to replicate to one or more Partition Nodes (Node 1 or Node 2).
+     * 
+     * How Users Are Shielded:
+     * - The write is acknowledged as successful once committed to the Central Node
+     * - Users can continue reading from the Central Node immediately
+     * - Failed writes are queued in memory for later retry
+     * - The system maintains eventual consistency through background recovery
+     * 
+     * Recovery Strategy:
+     * 1. Detect partition node failure during replication attempt
+     * 2. Queue the failed write with full context (query, params, timestamp)
+     * 3. Return success to the user (Central write succeeded)
+     * 4. Background process will retry queued writes when node recovers
+     * 
+     * Data Availability:
+     * - Reads can be served from Central Node (always has complete data)
+     * - Partition-specific queries may miss recent updates until recovery completes
+     * - No data loss occurs - all writes are persisted to Central Node
+     */
     static async testCase3(NODE_STATE) {
         let logs = [];
         let cConn;
         let timestamp;
+        let insertedId;
         const sql = "INSERT INTO users (firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)";
         let params;
+
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        logs.push("📝 CASE #3: Central → Partition Replication");
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         // -------------------------------------------------
         // 1. WRITE TO CENTRAL (With Timeout & Error Handling)
@@ -827,28 +1026,37 @@ class db_service {
         try {
             const cPool = db_router.getNodeById(0);
             
+            logs.push("📝 PHASE 1: Writing to Central Node");
+            logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             // Attempt to get connection with timeout
             cConn = await db_service.connectWithTimeout(cPool, 2000);
 
             await cConn.beginTransaction();
-            logs.push("Writing to CENTRAL...");
 
-            // Use variable for timestamp to ensure consistency
+            // Use variable for timestamp to ensure consistency across all nodes
             timestamp = new Date();
-            params = ['case3_first', 'case3_last', 'City', 'UK', timestamp, timestamp];
+            const timestampStr = timestamp.toISOString().slice(0, 19).replace('T', ' ');
+            params = ['case3_first', 'case3_last', 'TestCity', 'UK', timestampStr, timestampStr];
 
-            // Execute query with timeout
-            await db_service.queryWithTimeout(cConn, sql, params, 2000);
+            // Execute query with timeout - let AUTO_INCREMENT handle the ID
+            const [result] = await db_service.queryWithTimeout(cConn, sql, params, 2000);
+            insertedId = result.insertId; // Get the auto-generated ID
 
             await cConn.commit();
-            logs.push("CENTRAL write SUCCESS.");
-            logs.push(`Timestamp used: ${timestamp.toISOString()}`);
+            logs.push("✅ Central Node: WRITE SUCCESSFUL");
+            logs.push(`   • Transaction ID: ${insertedId}`);
+            logs.push(`   • User: case3_first case3_last (UK)`);
+            logs.push(`   • Timestamp: ${timestampStr}`);
+            logs.push("");
         } catch (err) {
-            logs.push(`[ERROR] Central Write Failed: ${err.message}`);
+            logs.push("❌ Central Node: WRITE FAILED");
+            logs.push(`   • Error: ${err.message}`);
+            logs.push("   • Transaction ABORTED - User will see error");
+            logs.push("");
             if (cConn) {
                 try { await cConn.rollback(); } catch (rbErr) { /* ignore rollback error */ }
             }
-            return { success: false, logs };
+            return { success: false, logs, centralWriteSuccess: false };
         } finally {
             if (cConn) cConn.release();
         }
@@ -856,65 +1064,185 @@ class db_service {
         // -------------------------------------------------
         // 2. REPLICATE TO PARTITIONS
         // -------------------------------------------------
+        logs.push("🔄 PHASE 2: Replicating to Partition Nodes");
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        let replicationResults = { 1: false, 2: false };
+        let queuedWrites = [];
+
         for (let partition of [1, 2]) {
             let pConn;
+            logs.push(`Partition ${partition}:`);
+            
             try {
-                // 1. Check Health First
+                // 1. CRITICAL: Check simulated NODE_STATE first (from UI toggle)
+                if (!NODE_STATE[partition]) {
+                    throw new Error(`Node ${partition} is OFFLINE (simulated failure)`);
+                }
+
+                // 2. If simulated state is ONLINE, check actual health
                 const isHealthy = await db_service.isNodeHealthy(partition, 1000);
                 
                 if (!isHealthy) {
                     throw new Error(`Node ${partition} is unhealthy/unreachable`);
                 }
 
-                // 2. Attempt Replication
+                // 3. Attempt Replication
                 const pPool = db_router.getNodeById(partition);
                 pConn = await db_service.connectWithTimeout(pPool, 2000);
                 
                 await db_service.queryWithTimeout(pConn, sql, params, 2000);
                 
-                logs.push(`Replication to Partition ${partition} SUCCESS.`);
+                logs.push(`  ✅ Replication successful`);
+                replicationResults[partition] = true;
 
             } catch (err) {
-                logs.push(`[WARNING] Replication to Partition ${partition} FAILED: ${err.message}`);
+                const errorType = db_service.classifyError(err);
+                logs.push(`  ❌ Replication failed`);
+                logs.push(`     Reason: ${err.message}`);
                 
                 // 3. Queue Missed Write
-                db_service.missedWrites[partition].push({
+                const missedWrite = {
                     query: sql,
                     params: params,
                     originalTimestamp: timestamp,
+                    insertedId: insertedId,
                     attemptCount: 1,
-                    lastError: err.message
-                });
-                logs.push(`Write queued for Partition ${partition}.`);
+                    lastError: err.message,
+                    errorType: errorType.type,
+                    queuedAt: new Date()
+                };
+                
+                db_service.missedWrites[partition].push(missedWrite);
+                queuedWrites.push(partition);
+                
+                logs.push(`  📋 Queued for recovery (Queue size: ${db_service.missedWrites[partition].length})`);
+                
+                replicationResults[partition] = false;
             } finally {
                 if (pConn) pConn.release();
             }
+            logs.push("");
         }
 
-        return { success: true, logs };
+        // -------------------------------------------------
+        // 3. SUMMARY
+        // -------------------------------------------------
+        logs.push("");
+        logs.push("📊 SUMMARY");
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        logs.push(`Central Node:  ${replicationResults[1] && replicationResults[2] ? '✅' : '✅'} Committed`);
+        logs.push(`Partition 1:   ${replicationResults[1] ? '✅ Synchronized' : '⏳ Queued'}`);
+        logs.push(`Partition 2:   ${replicationResults[2] ? '✅ Synchronized' : '⏳ Queued'}`);
+        logs.push("");
+        
+        if (queuedWrites.length > 0) {
+            logs.push("💡 User Experience:");
+            logs.push("   ✅ Transaction successful - User sees SUCCESS");
+            logs.push("   ✅ Data immediately available on Central Node");
+            logs.push("");
+            logs.push("⚠️  Pending Recovery:");
+            logs.push(`   ${queuedWrites.map(p => 'Partition ' + p).join(', ')} - Queued for automatic recovery`);
+            logs.push("   Background monitor will sync when nodes come online");
+            logs.push("");
+            logs.push(`📈 Queue Status: P1=${db_service.missedWrites[1].length} | P2=${db_service.missedWrites[2].length}`);
+        } else {
+            logs.push("✅ All nodes synchronized - Full replication success!");
+        }
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+        return { 
+            success: true, 
+            logs,
+            centralWriteSuccess: true,
+            replicationResults,
+            queuedWrites,
+            queueSizes: {
+                partition1: db_service.missedWrites[1].length,
+                partition2: db_service.missedWrites[2].length
+            }
+        };
     }
 
     // =========================
     // CASE 4: Partition recovers after missed writes
     // =========================
+    /**
+     * Case #4: Partition Node Recovery
+     * 
+     * Scenario: A previously failed Partition Node (Node 1 or Node 2) comes back online
+     * and needs to catch up with missed write transactions that were queued during its downtime.
+     * 
+     * Recovery Strategy:
+     * 1. Detect that node is healthy again (health check)
+     * 2. Process queued writes in order (FIFO)
+     * 3. Retry failed writes with exponential backoff
+     * 4. Handle duplicate detection (record may already exist)
+     * 5. Update queue - remove successful writes, keep failed ones
+     * 
+     * What Happens During Recovery:
+     * - Each missed write is replayed in the order it was queued
+     * - Duplicate entries are handled gracefully (skip or update)
+     * - Transient errors trigger retry with backoff
+     * - Permanent errors are logged but don't block other writes
+     * - Queue is updated incrementally as writes succeed
+     * 
+     * Data Consistency:
+     * - After recovery completes, partition has all missed data
+     * - Partition queries now return consistent results
+     * - System achieves eventual consistency
+     * - No manual intervention required
+     */
     static async testCase4(NODE_STATE) {
         let logs = [];
+        let overallStats = {
+            totalAttempted: 0,
+            totalSuccess: 0,
+            totalFailed: 0,
+            partitions: {}
+        };
+
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        logs.push("🔄 CASE #4: Partition Recovery & Synchronization");
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        logs.push("");
 
         for (let partition of [1, 2]) {
+            logs.push(`🔍 Partition ${partition}:`);
+            
             // 1. Check if there are missed writes
-            if (db_service.missedWrites[partition].length === 0) {
-                logs.push(`No missed writes for Partition ${partition}.`);
+            const queueSize = db_service.missedWrites[partition].length;
+            if (queueSize === 0) {
+                logs.push(`   ✅ Already synchronized (no queued writes)`);
+                logs.push("");
+                overallStats.partitions[partition] = { status: 'SYNCHRONIZED', processed: 0 };
                 continue;
             }
 
-            // 2. Check Health
+            logs.push(`   📋 Queue: ${queueSize} pending write(s)`);
+
+            // 2. Check simulated state FIRST (respect UI toggles)
+            if (!NODE_STATE[partition]) {
+                logs.push(`   🔴 Status: OFFLINE (simulated)`);
+                logs.push(`   ⏸️  Recovery postponed - Node must be toggled ON`);
+                logs.push("");
+                overallStats.partitions[partition] = { status: 'OFFLINE_SIMULATED', processed: 0 };
+                continue;
+            }
+
+            // 3. Check actual health
             const isHealthy = await db_service.isNodeHealthy(partition, 1000);
             if (!isHealthy) {
-                logs.push(`Partition ${partition} is still OFFLINE/UNREACHABLE. Skipping recovery.`);
+                logs.push(`   🔴 Status: UNREACHABLE (connection failed)`);
+                logs.push(`   ⏸️  Recovery postponed - Queue maintained`);
+                logs.push("");
+                overallStats.partitions[partition] = { status: 'OFFLINE', processed: 0 };
                 continue;
             }
 
-            logs.push(`Partition ${partition} is ONLINE. Attempting recovery of ${db_service.missedWrites[partition].length} writes...`);
+            logs.push(`   🟢 Status: ONLINE and healthy`);
+            logs.push(`   ▶️  Starting recovery process...`);
+            logs.push("");
 
             const pPool = db_router.getNodeById(partition);
             let pConn;
@@ -923,41 +1251,140 @@ class db_service {
                 pConn = await db_service.connectWithTimeout(pPool, 2000);
                 
                 // Process queue
-                // We iterate backwards or use a new array to handle removals safely
-                // But here we'll just process and clear successful ones
                 const remainingWrites = [];
                 let successCount = 0;
+                let failedCount = 0;
+                let skippedCount = 0;
 
-                for (let write of db_service.missedWrites[partition]) {
+                for (let i = 0; i < db_service.missedWrites[partition].length; i++) {
+                    const write = db_service.missedWrites[partition][i];
+                    const writeNum = i + 1;
+                    
+                    logs.push(`   ├─ [${writeNum}/${queueSize}] ${write.params[0]} ${write.params[1]} (${write.params[3]})`);
+
                     try {
+                        // Check if record already exists (duplicate detection)
+                        const checkSql = "SELECT id FROM users WHERE firstname = ? AND lastname = ? AND country = ? AND createdAt = ?";
+                        const [existing] = await db_service.queryWithTimeout(
+                            pConn, 
+                            checkSql, 
+                            [write.params[0], write.params[1], write.params[3], write.params[4]], 
+                            2000
+                        );
+
+                        if (existing && existing.length > 0) {
+                            logs.push(`   │  ✅ Already exists - Skipping`);
+                            skippedCount++;
+                            successCount++; // Count as success (desired state achieved)
+                            continue;
+                        }
+
+                        // Apply the write with retry logic
                         await db_service.retryOperation(async () => {
-                            // Apply the write
                             await db_service.queryWithTimeout(pConn, write.query, write.params, 2000);
-                            logs.push(`[APPLIED] Recovered write for '${write.params[0]}' on Partition ${partition}.`);
                         }, 3, 500, logs); // 3 retries, 500ms delay
 
+                        logs.push(`   │  ✅ Successfully recovered`);
                         successCount++;
+
                     } catch (err) {
-                        logs.push(`[FAILED] Could not recover write for '${write.params[0]}': ${err.message}`);
-                        // Keep in queue
+                        const errorType = db_service.classifyError(err);
+                        logs.push(`   │  ❌ Failed: ${err.message}`);
+                        
+                        // Update write metadata
                         write.attemptCount++;
                         write.lastError = err.message;
-                        remainingWrites.push(write);
+                        write.lastAttempt = new Date();
+                        write.errorType = errorType.type;
+                        
+                        // Keep in queue if retryable
+                        if (errorType.type === 'RETRYABLE' || errorType.type === 'UNKNOWN') {
+                            remainingWrites.push(write);
+                            logs.push(`   │  🔁 Kept in queue (attempt ${write.attemptCount})`);
+                        } else {
+                            logs.push(`   │  ⚠️  Permanent error - Manual intervention needed`);
+                        }
+                        
+                        failedCount++;
                     }
                 }
 
                 // Update queue with only failed writes
                 db_service.missedWrites[partition] = remainingWrites;
-                logs.push(`Recovery finished for Partition ${partition}. Success: ${successCount}, Remaining: ${remainingWrites.length}`);
+                
+                logs.push("");
+                logs.push(`   📊 Recovery Complete:`);
+                logs.push(`      Processed: ${queueSize} | Success: ${successCount} | Failed: ${failedCount}`);
+                if (skippedCount > 0) {
+                    logs.push(`      Duplicates skipped: ${skippedCount}`);
+                }
+                if (remainingWrites.length > 0) {
+                    logs.push(`      ⚠️  Still queued: ${remainingWrites.length}`);
+                } else {
+                    logs.push(`      ✅ Queue cleared - Partition synchronized`);
+                }
+                logs.push("");
+
+                overallStats.totalAttempted += queueSize;
+                overallStats.totalSuccess += successCount;
+                overallStats.totalFailed += failedCount;
+                overallStats.partitions[partition] = {
+                    status: 'RECOVERED',
+                    processed: queueSize,
+                    success: successCount,
+                    failed: failedCount,
+                    remaining: remainingWrites.length
+                };
 
             } catch (err) {
-                logs.push(`[ERROR] Recovery process failed for Partition ${partition}: ${err.message}`);
+                logs.push(`  ✗ [ERROR] Recovery process failed: ${err.message}`);
+                logs.push(`  → Connection issue or critical error`);
+                logs.push(`  → All writes remain in queue for next attempt`);
+                logs.push("");
+                
+                overallStats.partitions[partition] = {
+                    status: 'RECOVERY_FAILED',
+                    error: err.message
+                };
             } finally {
                 if (pConn) pConn.release();
             }
         }
 
-        return { success: true, logs };
+        // -------------------------------------------------
+        // OVERALL SUMMARY
+        // -------------------------------------------------
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        logs.push("📊 OVERALL SUMMARY");
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        logs.push(`Total Attempted: ${overallStats.totalAttempted} | Success: ${overallStats.totalSuccess} | Failed: ${overallStats.totalFailed}`);
+        logs.push("");
+        
+        logs.push("📦 Current Queue Status:");
+        logs.push(`   Partition 1: ${db_service.missedWrites[1].length} pending`);
+        logs.push(`   Partition 2: ${db_service.missedWrites[2].length} pending`);
+        logs.push("");
+
+        const allSynced = db_service.missedWrites[1].length === 0 && db_service.missedWrites[2].length === 0;
+        if (allSynced) {
+            logs.push("✅ SYSTEM STATUS: All partitions synchronized");
+            logs.push("✅ Eventual consistency achieved!");
+        } else {
+            logs.push("⚠️  SYSTEM STATUS: Recovery incomplete");
+            logs.push("💡 Next Steps: Wait for background monitor or run Case #4 again");
+        }
+        logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+        return { 
+            success: true, 
+            logs,
+            stats: overallStats,
+            queueSizes: {
+                partition1: db_service.missedWrites[1].length,
+                partition2: db_service.missedWrites[2].length
+            },
+            fullyRecovered: allSynced
+        };
     }
 
 

@@ -1,6 +1,52 @@
-# STADVDB_MCO2 – Transaction Management
+# STADVDB_MCO2 – Transaction Management & Distributed Database Recovery
 
-This repository holds the project for the **STADVDB MCO2** course, focusing on **Transaction Management**.
+This repository holds the project for the **STADVDB MCO2** course, focusing on **Transaction Management** and **Distributed Database Failure Recovery**.
+
+## 🎯 Project Overview
+
+This web application demonstrates a distributed database system with:
+- **3-node architecture**: 1 Central Node + 2 Partition Nodes
+- **Automatic failure detection and recovery**
+- **User shielding from node failures**
+- **Eventual consistency guarantees**
+- **Real-time monitoring and visualization**
+
+### Key Features
+
+#### Case #3: Central → Partition Replication Failure
+When a write succeeds on the Central Node but fails to replicate to partitions:
+- ✓ User sees SUCCESS (shielded from failure)
+- ✓ Write queued automatically for later recovery
+- ✓ System continues operating normally
+- ✓ Data readable from Central Node immediately
+
+#### Case #4: Partition Recovery
+When a failed partition comes back online:
+- ✓ Automatic detection of node recovery
+- ✓ Intelligent replay of missed writes
+- ✓ Duplicate detection and handling
+- ✓ Retry logic with error classification
+- ✓ Eventual consistency achieved
+
+#### Background Recovery Monitor
+- ✓ Automatic periodic health checks (30s intervals)
+- ✓ Non-blocking background processing
+- ✓ Real-time statistics tracking
+- ✓ No manual intervention required
+
+#### Enhanced Monitoring Dashboard
+- Real-time queue status for all nodes
+- Node health indicators (ONLINE/OFFLINE)
+- Concurrent transaction simulation
+- Detailed event logging
+- Recovery statistics
+
+## 📚 Documentation
+
+Comprehensive documentation available:
+- **[RECOVERY_STRATEGY.md](./RECOVERY_STRATEGY.md)** - Detailed architecture and recovery strategy
+- **[TESTING_GUIDE.md](./TESTING_GUIDE.md)** - Step-by-step testing procedures
+- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Deployment and demonstration instructions
 
 The `db/` folder contains a Python script (`test_db.py`) used to verify the connection to the CCS Cloud MySQL node and confirm the database is reachable.
 
