@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: stadvdb-mco2-app
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE0_HOST
+        sync: false
+      - key: NODE0_PORT
+        sync: false
+      - key: NODE0_USER
+        sync: false
+      - key: NODE0_PASSWORD
+        sync: false
+      - key: NODE0_DB
+        sync: false
+      - key: NODE1_HOST
+        sync: false
+      - key: NODE1_PORT
+        sync: false
+      - key: NODE1_USER
+        sync: false
+      - key: NODE1_PASSWORD
+        sync: false
+      - key: NODE1_DB
+        sync: false
+      - key: NODE2_HOST
+        sync: false
+      - key: NODE2_PORT
+        sync: false
+      - key: NODE2_USER
+        sync: false
+      - key: NODE2_PASSWORD
+        sync: false
+      - key: NODE2_DB
+        sync: false
+      - key: DB_CONNECTION_LIMIT
+        value: 10
+      - key: DB_QUEUE_LIMIT
+        value: 0

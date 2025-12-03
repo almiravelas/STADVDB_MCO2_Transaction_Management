@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NODE0_HOST=${NODE0_HOST}
+      - NODE0_PORT=${NODE0_PORT}
+      - NODE0_USER=${NODE0_USER}
+      - NODE0_PASSWORD=${NODE0_PASSWORD}
+      - NODE0_DB=${NODE0_DB}
+      - NODE1_HOST=${NODE1_HOST}
+      - NODE1_PORT=${NODE1_PORT}
+      - NODE1_USER=${NODE1_USER}
+      - NODE1_PASSWORD=${NODE1_PASSWORD}
+      - NODE1_DB=${NODE1_DB}
+      - NODE2_HOST=${NODE2_HOST}
+      - NODE2_PORT=${NODE2_PORT}
+      - NODE2_USER=${NODE2_USER}
+      - NODE2_PASSWORD=${NODE2_PASSWORD}
+      - NODE2_DB=${NODE2_DB}
+      - DB_CONNECTION_LIMIT=${DB_CONNECTION_LIMIT:-10}
+      - DB_QUEUE_LIMIT=${DB_QUEUE_LIMIT:-0}
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
