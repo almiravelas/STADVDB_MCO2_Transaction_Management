@@ -1584,6 +1584,14 @@ class db_service {
         logs.push(`Partition 2:   ${replicationResults[2] ? '✅ Synchronized' : '⏳ Queued'}`);
         logs.push("");
         
+        // Get PERSISTENT queue status (the real source of truth on Vercel)
+        let persistentQueueStatus = { 1: 0, 2: 0 };
+        try {
+            persistentQueueStatus = await db_service.getPersistentQueueStatus();
+        } catch (e) {
+            logs.push(`⚠️  Could not fetch persistent queue status: ${e.message}`);
+        }
+
         if (queuedWrites.length > 0) {
             logs.push("💡 User Experience:");
             logs.push("   ✅ Transaction successful - User sees SUCCESS");
@@ -1593,7 +1601,7 @@ class db_service {
             logs.push(`   ${queuedWrites.map(p => 'Partition ' + p).join(', ')} - Queued for automatic recovery`);
             logs.push("   Background monitor will sync when nodes come online");
             logs.push("");
-            logs.push(`📈 Queue Status: P1=${db_service.missedWrites[1].length} | P2=${db_service.missedWrites[2].length}`);
+            logs.push(`📈 Persistent Queue Status: P1=${persistentQueueStatus[1]} | P2=${persistentQueueStatus[2]}`);
         } else {
             logs.push("✅ All nodes synchronized - Full replication success!");
         }
@@ -1606,8 +1614,8 @@ class db_service {
             replicationResults,
             queuedWrites,
             queueSizes: {
-                partition1: db_service.missedWrites[1].length,
-                partition2: db_service.missedWrites[2].length
+                partition1: persistentQueueStatus[1],
+                partition2: persistentQueueStatus[2]
             }
         };
     }
@@ -1655,11 +1663,22 @@ class db_service {
         logs.push("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         logs.push("");
 
+        // Get persistent queue status FIRST (source of truth on Vercel)
+        let persistentQueueStatus = { 1: 0, 2: 0 };
+        try {
+            persistentQueueStatus = await db_service.getPersistentQueueStatus();
+            logs.push(`📋 Persistent Queue Status: P1=${persistentQueueStatus[1]} | P2=${persistentQueueStatus[2]}`);
+            logs.push("");
+        } catch (e) {
+            logs.push(`⚠️  Could not fetch persistent queue: ${e.message}`);
+            logs.push("");
+        }
+
         for (let partition of [1, 2]) {
             logs.push(`🔍 Partition ${partition}:`);
             
-            // 1. Check if there are missed writes
-            const queueSize = db_service.missedWrites[partition].length;
+            // 1. Check if there are missed writes in PERSISTENT queue
+            const queueSize = persistentQueueStatus[partition] || 0;
             if (queueSize === 0) {
                 logs.push(`   ✅ Already synchronized (no queued writes)`);
                 logs.push("");
@@ -1692,96 +1711,31 @@ class db_service {
             logs.push(`   ▶️  Starting recovery process...`);
             logs.push("");
 
-            const pPool = db_router.getNodeById(partition);
-            let pConn;
-
+            // Use processPersistentQueue to handle recovery from database queue
             try {
-                pConn = await db_service.connectWithTimeout(pPool, 2000);
+                const recoveredCount = await db_service.processPersistentQueue(partition);
                 
-                // Process queue
-                const remainingWrites = [];
-                let successCount = 0;
-                let failedCount = 0;
-                let skippedCount = 0;
-
-                for (let i = 0; i < db_service.missedWrites[partition].length; i++) {
-                    const write = db_service.missedWrites[partition][i];
-                    const writeNum = i + 1;
-                    
-                    logs.push(`   ├─ [${writeNum}/${queueSize}] ${write.params[0]} ${write.params[1]} (${write.params[3]})`);
-
-                    try {
-                        // Check if record already exists (duplicate detection)
-                        const checkSql = "SELECT id FROM users WHERE firstname = ? AND lastname = ? AND country = ? AND createdAt = ?";
-                        const [existing] = await db_service.queryWithTimeout(
-                            pConn, 
-                            checkSql, 
-                            [write.params[0], write.params[1], write.params[3], write.params[4]], 
-                            2000
-                        );
-
-                        if (existing && existing.length > 0) {
-                            logs.push(`   │  ✅ Already exists - Skipping`);
-                            skippedCount++;
-                            successCount++; // Count as success (desired state achieved)
-                            continue;
-                        }
-
-                        // Apply the write with retry logic
-                        await db_service.retryOperation(async () => {
-                            await db_service.queryWithTimeout(pConn, write.query, write.params, 2000);
-                        }, 3, 500, logs); // 3 retries, 500ms delay
-
-                        logs.push(`   │  ✅ Successfully recovered`);
-                        successCount++;
-
-                    } catch (err) {
-                        const errorType = db_service.classifyError(err);
-                        logs.push(`   │  ❌ Failed: ${err.message}`);
-                        
-                        // Update write metadata
-                        write.attemptCount++;
-                        write.lastError = err.message;
-                        write.lastAttempt = new Date();
-                        write.errorType = errorType.type;
-                        
-                        // Keep in queue if retryable
-                        if (errorType.type === 'RETRYABLE' || errorType.type === 'UNKNOWN') {
-                            remainingWrites.push(write);
-                            logs.push(`   │  🔁 Kept in queue (attempt ${write.attemptCount})`);
-                        } else {
-                            logs.push(`   │  ⚠️  Permanent error - Manual intervention needed`);
-                        }
-                        
-                        failedCount++;
-                    }
-                }
-
-                // Update queue with only failed writes
-                db_service.missedWrites[partition] = remainingWrites;
+                // Get updated queue status
+                const updatedStatus = await db_service.getPersistentQueueStatus();
+                const remainingCount = updatedStatus[partition] || 0;
                 
-                logs.push("");
                 logs.push(`   📊 Recovery Complete:`);
-                logs.push(`      Processed: ${queueSize} | Success: ${successCount} | Failed: ${failedCount}`);
-                if (skippedCount > 0) {
-                    logs.push(`      Duplicates skipped: ${skippedCount}`);
-                }
-                if (remainingWrites.length > 0) {
-                    logs.push(`      ⚠️  Still queued: ${remainingWrites.length}`);
+                logs.push(`      Processed: ${queueSize} | Recovered: ${recoveredCount}`);
+                if (remainingCount > 0) {
+                    logs.push(`      ⚠️  Still queued: ${remainingCount}`);
                 } else {
                     logs.push(`      ✅ Queue cleared - Partition synchronized`);
                 }
                 logs.push("");
 
                 overallStats.totalAttempted += queueSize;
-                overallStats.totalSuccess += successCount;
-                overallStats.totalFailed += failedCount;
+                overallStats.totalSuccess += recoveredCount;
+                overallStats.totalFailed += remainingCount;
                 overallStats.partitions[partition] = {
-                    status: 'RECOVERED',
+                    status: recoveredCount > 0 ? 'RECOVERED' : 'NO_CHANGE',
                     processed: queueSize,
-                    success: successCount,
-                    failed: failedCount,
-                    remaining: remainingWrites.length
+                    success: recoveredCount,
+                    remaining: remainingCount
                 };
 
             } catch (err) {
@@ -1794,8 +1748,6 @@ class db_service {
                     status: 'RECOVERY_FAILED',
                     error: err.message
                 };
-            } finally {
-                if (pConn) pConn.release();
             }
         }
 
