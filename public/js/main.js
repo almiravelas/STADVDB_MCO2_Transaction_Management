@@ -442,10 +442,126 @@ document.addEventListener('DOMContentLoaded', () => {
             updateQueue('node0Queue', queueData.central || 0);
             updateQueue('node1Queue', queueData.partition1 || 0);
             updateQueue('node2Queue', queueData.partition2 || 0);
+
+            // Update Global Status Card
+            const totalQueue = (queueData.central || 0) + (queueData.partition1 || 0) + (queueData.partition2 || 0);
+            const node0Online = data.node0.status === 'connected';
+            const node1Online = data.node1.status === 'connected';
+            const node2Online = data.node2.status === 'connected';
+            const allOnline = node0Online && node1Online && node2Online;
+
+            const statusCard = document.getElementById('globalStatusCard');
+            const statusIcon = document.getElementById('globalStatusIcon');
+            const statusText = document.getElementById('globalStatusText');
+            const statusDesc = document.getElementById('globalStatusDesc');
+
+            if (allOnline && totalQueue === 0) {
+                // All good
+                statusCard.style.background = 'linear-gradient(135deg, #E2FBD7 0%, #d4f5c9 100%)';
+                statusCard.style.borderColor = '#34B53A';
+                statusIcon.style.background = '#34B53A';
+                statusIcon.innerHTML = "<i class='bx bx-check-circle' style='font-size:30px; color:white;'></i>";
+                statusText.innerText = 'All Systems Operational';
+                statusDesc.innerText = 'All nodes connected. No pending recovery operations.';
+            } else if (!allOnline && totalQueue > 0) {
+                // Nodes down with pending writes
+                statusCard.style.background = 'linear-gradient(135deg, #FFE5E5 0%, #ffd6d6 100%)';
+                statusCard.style.borderColor = '#FF4C4C';
+                statusIcon.style.background = '#FF4C4C';
+                statusIcon.innerHTML = "<i class='bx bx-error-circle' style='font-size:30px; color:white;'></i>";
+                statusText.innerText = 'Failure Detected - Recovery In Progress';
+                const offlineNodes = [];
+                if (!node0Online) offlineNodes.push('Central');
+                if (!node1Online) offlineNodes.push('Partition 1');
+                if (!node2Online) offlineNodes.push('Partition 2');
+                statusDesc.innerText = `${offlineNodes.join(', ')} offline. ${totalQueue} write(s) queued for recovery.`;
+            } else if (!allOnline) {
+                // Nodes down but no pending writes
+                statusCard.style.background = 'linear-gradient(135deg, #FFF3E0 0%, #ffe8cc 100%)';
+                statusCard.style.borderColor = '#FFA500';
+                statusIcon.style.background = '#FFA500';
+                statusIcon.innerHTML = "<i class='bx bx-error' style='font-size:30px; color:white;'></i>";
+                statusText.innerText = 'Degraded Mode';
+                const offlineNodes = [];
+                if (!node0Online) offlineNodes.push('Central');
+                if (!node1Online) offlineNodes.push('Partition 1');
+                if (!node2Online) offlineNodes.push('Partition 2');
+                statusDesc.innerText = `${offlineNodes.join(', ')} offline. System operating in degraded mode.`;
+            } else if (totalQueue > 0) {
+                // All online but still recovering
+                statusCard.style.background = 'linear-gradient(135deg, #E3F2FD 0%, #d0e8fc 100%)';
+                statusCard.style.borderColor = '#2196F3';
+                statusIcon.style.background = '#2196F3';
+                statusIcon.innerHTML = "<i class='bx bx-loader-alt bx-spin' style='font-size:30px; color:white;'></i>";
+                statusText.innerText = 'Recovery In Progress';
+                statusDesc.innerText = `All nodes online. Processing ${totalQueue} queued write(s)...`;
+            }
+
+            // Update Pending Writes Section
+            const pendingSection = document.getElementById('pendingWritesSection');
+            const pendingList = document.getElementById('pendingWritesList');
+            if (totalQueue > 0 && queueData.details) {
+                pendingSection.style.display = 'block';
+                let html = '';
+                const addDetails = (nodeName, details) => {
+                    if (details && details.length > 0) {
+                        details.forEach((w, i) => {
+                            html += `<div style="padding:8px; border-bottom:1px solid #ffe0a0; display:flex; justify-content:space-between;">
+                                <span><strong>${nodeName}:</strong> ${w.user} (${w.country})</span>
+                                <span style="color:#888; font-size:11px;">Attempts: ${w.attempts || 0}</span>
+                            </div>`;
+                        });
+                    }
+                };
+                addDetails('Central', queueData.details.central);
+                addDetails('Partition 1', queueData.details.partition1);
+                addDetails('Partition 2', queueData.details.partition2);
+                pendingList.innerHTML = html || '<div style="color:#888; text-align:center;">No details available</div>';
+            } else {
+                pendingSection.style.display = 'none';
+            }
+
+            // Update last check time
+            const lastCheck = document.getElementById('lastCheckTime');
+            if (lastCheck) {
+                lastCheck.innerText = new Date().toLocaleTimeString();
+            }
+
+            // Add to recovery log if there are changes
+            if (totalQueue > 0 || !allOnline) {
+                addRecoveryLog(allOnline, totalQueue, node0Online, node1Online, node2Online);
+            }
+
         } catch(e) { 
             console.error('[updateStats] Error:', e);
         }
     };
+
+    // Recovery Log Helper
+    const recoveryLogEntries = [];
+    function addRecoveryLog(allOnline, totalQueue, n0, n1, n2) {
+        const log = document.getElementById('recoveryLog');
+        if (!log) return;
+        
+        const time = new Date().toLocaleTimeString();
+        let msg = '';
+        if (!allOnline) {
+            const offline = [];
+            if (!n0) offline.push('Central');
+            if (!n1) offline.push('P1');
+            if (!n2) offline.push('P2');
+            msg = `[${time}] ⚠️ Node(s) offline: ${offline.join(', ')}`;
+        }
+        if (totalQueue > 0) {
+            msg += msg ? ` | Queue: ${totalQueue}` : `[${time}] 🔄 Queue: ${totalQueue} pending`;
+        }
+        
+        if (msg && (recoveryLogEntries.length === 0 || recoveryLogEntries[0] !== msg)) {
+            recoveryLogEntries.unshift(msg);
+            if (recoveryLogEntries.length > 20) recoveryLogEntries.pop();
+            log.innerHTML = recoveryLogEntries.map(e => `<div style="padding:3px 0; border-bottom:1px solid #e8ecf4;">${e}</div>`).join('');
+        }
+    }
 
     // HISTORY HELPER
     window.addTransaction = (type, name) => {
