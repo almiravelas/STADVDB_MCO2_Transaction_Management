@@ -98,47 +98,103 @@ const failureController = {
         res.json(status);
     },
 
-    getQueueStatus(req, res) {
-        const status = {
-            central: db_service.missedWrites[0].length,
-            partition1: db_service.missedWrites[1].length,
-            partition2: db_service.missedWrites[2].length,
-            total: db_service.missedWrites[0].length + 
-                   db_service.missedWrites[1].length + 
-                   db_service.missedWrites[2].length,
-            details: {
-                central: db_service.missedWrites[0].map(w => ({
-                    user: `${w.params[0]} ${w.params[1]}`,
-                    country: w.params[3],
-                    attempts: w.attemptCount,
-                    lastError: w.lastError
-                })),
-                partition1: db_service.missedWrites[1].map(w => ({
-                    user: `${w.params[0]} ${w.params[1]}`,
-                    country: w.params[3],
-                    attempts: w.attemptCount,
-                    lastError: w.lastError
-                })),
-                partition2: db_service.missedWrites[2].map(w => ({
-                    user: `${w.params[0]} ${w.params[1]}`,
-                    country: w.params[3],
-                    attempts: w.attemptCount,
-                    lastError: w.lastError
-                }))
-            }
-        };
-        res.json(status);
+    async getQueueStatus(req, res) {
+        try {
+            // Try to get from persistent database queue first
+            const persistentQueue = await db_service.getPersistentQueueStatus();
+            
+            // Combine with in-memory queue (for local development fallback)
+            const status = {
+                central: persistentQueue[0] + db_service.missedWrites[0].length,
+                partition1: persistentQueue[1] + db_service.missedWrites[1].length,
+                partition2: persistentQueue[2] + db_service.missedWrites[2].length,
+                total: persistentQueue[0] + persistentQueue[1] + persistentQueue[2] +
+                       db_service.missedWrites[0].length + 
+                       db_service.missedWrites[1].length + 
+                       db_service.missedWrites[2].length,
+                details: {
+                    central: [
+                        ...persistentQueue.details.central,
+                        ...db_service.missedWrites[0].map(w => ({
+                            user: `${w.params[1]} ${w.params[2]}`,
+                            country: w.params[4],
+                            attempts: w.attemptCount,
+                            lastError: w.lastError
+                        }))
+                    ],
+                    partition1: [
+                        ...persistentQueue.details.partition1,
+                        ...db_service.missedWrites[1].map(w => ({
+                            user: `${w.params[1]} ${w.params[2]}`,
+                            country: w.params[4],
+                            attempts: w.attemptCount,
+                            lastError: w.lastError
+                        }))
+                    ],
+                    partition2: [
+                        ...persistentQueue.details.partition2,
+                        ...db_service.missedWrites[2].map(w => ({
+                            user: `${w.params[1]} ${w.params[2]}`,
+                            country: w.params[4],
+                            attempts: w.attemptCount,
+                            lastError: w.lastError
+                        }))
+                    ]
+                }
+            };
+            res.json(status);
+        } catch (err) {
+            // Fallback to in-memory only
+            console.error('[Queue Status] Error getting persistent queue:', err.message);
+            const status = {
+                central: db_service.missedWrites[0].length,
+                partition1: db_service.missedWrites[1].length,
+                partition2: db_service.missedWrites[2].length,
+                total: db_service.missedWrites[0].length + 
+                       db_service.missedWrites[1].length + 
+                       db_service.missedWrites[2].length,
+                details: {
+                    central: db_service.missedWrites[0].map(w => ({
+                        user: `${w.params[1]} ${w.params[2]}`,
+                        country: w.params[4],
+                        attempts: w.attemptCount,
+                        lastError: w.lastError
+                    })),
+                    partition1: db_service.missedWrites[1].map(w => ({
+                        user: `${w.params[1]} ${w.params[2]}`,
+                        country: w.params[4],
+                        attempts: w.attemptCount,
+                        lastError: w.lastError
+                    })),
+                    partition2: db_service.missedWrites[2].map(w => ({
+                        user: `${w.params[1]} ${w.params[2]}`,
+                        country: w.params[4],
+                        attempts: w.attemptCount,
+                        lastError: w.lastError
+                    }))
+                }
+            };
+            res.json(status);
+        }
     },
 
     async getSystemHealth(req, res) {
         try {
+            // Get persistent queue status
+            let queueStatus = { 0: 0, 1: 0, 2: 0 };
+            try {
+                queueStatus = await db_service.getPersistentQueueStatus();
+            } catch (e) {
+                // Fallback to in-memory
+            }
+            
             const health = {
                 timestamp: new Date().toISOString(),
                 nodes: {},
                 queues: {
-                    central: db_service.missedWrites[0].length,
-                    partition1: db_service.missedWrites[1].length,
-                    partition2: db_service.missedWrites[2].length
+                    central: queueStatus[0] + db_service.missedWrites[0].length,
+                    partition1: queueStatus[1] + db_service.missedWrites[1].length,
+                    partition2: queueStatus[2] + db_service.missedWrites[2].length
                 },
                 monitor: db_service.getRecoveryMonitorStatus(),
                 overall: 'HEALTHY'

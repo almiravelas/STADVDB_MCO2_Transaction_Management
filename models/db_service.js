@@ -6,7 +6,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 class db_service {
 
-    // Queue for storing failed writes during node downtime
+    // In-memory queue for fallback (still useful for local testing)
     // Structure: { 0: [], 1: [], 2: [] }
     static missedWrites = {
         0: [],
@@ -33,6 +33,211 @@ class db_service {
             message: 'No recovery attempts yet'
         }
     };
+
+    // =========================================================
+    // PERSISTENT QUEUE METHODS (Database-backed for Vercel)
+    // =========================================================
+
+    /**
+     * Add a missed write to the persistent database queue
+     * Stores in Central node's recovery_queue table
+     */
+    static async queueMissedWrite(partition, userId, sql, params, error) {
+        const centralPool = db_router.getCentralNode();
+        let conn;
+        try {
+            conn = await centralPool.getConnection();
+            const insertSql = `
+                INSERT INTO recovery_queue (target_partition, user_id, query_text, params_json, last_error, error_type)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `;
+            await conn.query(insertSql, [
+                partition,
+                userId,
+                sql,
+                JSON.stringify(params),
+                error.message || 'Unknown error',
+                db_service.classifyError(error).type
+            ]);
+            console.log(`[Queue] Added user ${userId} to persistent queue for partition ${partition}`);
+            return true;
+        } catch (err) {
+            console.error('[Queue] Failed to persist missed write:', err.message);
+            // Fallback to in-memory queue
+            db_service.missedWrites[partition].push({
+                query: sql,
+                params: params,
+                insertedId: userId,
+                attemptCount: 1,
+                lastError: error.message,
+                queuedAt: new Date()
+            });
+            return false;
+        } finally {
+            if (conn) conn.release();
+        }
+    }
+
+    /**
+     * Get pending writes count from persistent queue
+     */
+    static async getPersistentQueueStatus() {
+        const centralPool = db_router.getCentralNode();
+        let conn;
+        try {
+            conn = await centralPool.getConnection();
+            const [rows] = await conn.query(`
+                SELECT target_partition, COUNT(*) as count 
+                FROM recovery_queue 
+                WHERE status = 'pending' 
+                GROUP BY target_partition
+            `);
+            
+            const result = { 0: 0, 1: 0, 2: 0, details: { central: [], partition1: [], partition2: [] } };
+            rows.forEach(row => {
+                result[row.target_partition] = row.count;
+            });
+
+            // Get details for pending writes
+            const [details] = await conn.query(`
+                SELECT id, target_partition, user_id, params_json, attempt_count 
+                FROM recovery_queue 
+                WHERE status = 'pending'
+                ORDER BY queued_at ASC
+                LIMIT 20
+            `);
+            
+            details.forEach(d => {
+                const params = JSON.parse(d.params_json);
+                const detail = {
+                    id: d.id,
+                    user: `${params[1]} ${params[2]}`,
+                    country: params[4],
+                    attempts: d.attempt_count
+                };
+                if (d.target_partition === 1) result.details.partition1.push(detail);
+                else if (d.target_partition === 2) result.details.partition2.push(detail);
+                else result.details.central.push(detail);
+            });
+
+            return result;
+        } catch (err) {
+            console.error('[Queue] Failed to get persistent queue status:', err.message);
+            // Fallback to in-memory
+            return {
+                0: db_service.missedWrites[0].length,
+                1: db_service.missedWrites[1].length,
+                2: db_service.missedWrites[2].length,
+                details: { central: [], partition1: [], partition2: [] }
+            };
+        } finally {
+            if (conn) conn.release();
+        }
+    }
+
+    /**
+     * Process persistent queue for a partition
+     */
+    static async processPersistentQueue(partition) {
+        const centralPool = db_router.getCentralNode();
+        let centralConn;
+        let partitionConn;
+        let recoveredCount = 0;
+
+        try {
+            centralConn = await centralPool.getConnection();
+            
+            // Get pending writes for this partition
+            const [pending] = await centralConn.query(`
+                SELECT id, user_id, query_text, params_json, attempt_count 
+                FROM recovery_queue 
+                WHERE target_partition = ? AND status = 'pending'
+                ORDER BY queued_at ASC
+                LIMIT 10
+            `, [partition]);
+
+            if (pending.length === 0) {
+                return 0;
+            }
+
+            console.log(`[Recovery] Partition ${partition}: ${pending.length} pending writes in DB queue`);
+
+            // Try to connect to partition
+            const partitionPool = db_router.getNodeById(partition);
+            partitionConn = await db_service.connectWithTimeout(partitionPool, 2000);
+
+            for (const write of pending) {
+                try {
+                    const params = JSON.parse(write.params_json);
+                    const userId = write.user_id;
+
+                    // Check if already exists
+                    const [existing] = await partitionConn.query(
+                        "SELECT id FROM users WHERE id = ?", 
+                        [userId]
+                    );
+
+                    if (existing && existing.length > 0) {
+                        // Already exists, mark as completed
+                        await centralConn.query(
+                            "UPDATE recovery_queue SET status = 'completed', last_attempt_at = NOW() WHERE id = ?",
+                            [write.id]
+                        );
+                        console.log(`[Recovery] Skipped duplicate ID ${userId}`);
+                        recoveredCount++;
+                        continue;
+                    }
+
+                    // Execute the write
+                    await db_service.queryWithTimeout(partitionConn, write.query_text, params, 2000);
+                    
+                    // Mark as completed
+                    await centralConn.query(
+                        "UPDATE recovery_queue SET status = 'completed', last_attempt_at = NOW() WHERE id = ?",
+                        [write.id]
+                    );
+                    console.log(`[Recovery] ✓ Recovered ID ${userId}`);
+                    recoveredCount++;
+
+                } catch (err) {
+                    console.error(`[Recovery] Error recovering write ${write.id}:`, err.message);
+                    
+                    // Handle duplicate key error
+                    if (err.code === 'ER_DUP_ENTRY' || err.message.includes('Duplicate entry')) {
+                        await centralConn.query(
+                            "UPDATE recovery_queue SET status = 'completed', last_attempt_at = NOW() WHERE id = ?",
+                            [write.id]
+                        );
+                        recoveredCount++;
+                        continue;
+                    }
+
+                    // Update attempt count
+                    const newAttemptCount = write.attempt_count + 1;
+                    if (newAttemptCount >= 10) {
+                        await centralConn.query(
+                            "UPDATE recovery_queue SET status = 'failed', attempt_count = ?, last_error = ?, last_attempt_at = NOW() WHERE id = ?",
+                            [newAttemptCount, err.message, write.id]
+                        );
+                    } else {
+                        await centralConn.query(
+                            "UPDATE recovery_queue SET attempt_count = ?, last_error = ?, last_attempt_at = NOW() WHERE id = ?",
+                            [newAttemptCount, err.message, write.id]
+                        );
+                    }
+                }
+            }
+
+            return recoveredCount;
+
+        } catch (err) {
+            console.error(`[Recovery] Partition ${partition} recovery failed:`, err.message);
+            return 0;
+        } finally {
+            if (centralConn) centralConn.release();
+            if (partitionConn) partitionConn.release();
+        }
+    }
 
     /**
      * Start the background recovery monitor
@@ -75,6 +280,7 @@ class db_service {
     /**
      * Perform background recovery check
      * This is called automatically by the monitor
+     * Uses BOTH persistent queue (database) and in-memory queue
      */
     static async performBackgroundRecovery() {
         const checkTime = new Date();
@@ -87,14 +293,40 @@ class db_service {
         let totalRemaining = 0;
 
         for (let partition of [1, 2]) {
-            const recovered = await db_service.attemptPartitionRecovery(partition);
-            totalRecovered += recovered;
+            // Check simulated state first (respect UI toggles)
+            if (db_service.recoveryMonitor.nodeState && !db_service.recoveryMonitor.nodeState[partition]) {
+                console.log(`[Recovery] Partition ${partition}: OFFLINE (simulated) - skipping recovery`);
+                continue;
+            }
+
+            // Check actual health
+            const isHealthy = await db_service.isNodeHealthy(partition, 1000);
+            if (!isHealthy) {
+                console.log(`[Recovery] Partition ${partition}: Still offline`);
+                continue;
+            }
+
+            // Try persistent queue first
+            const persistentRecovered = await db_service.processPersistentQueue(partition);
+            totalRecovered += persistentRecovered;
+            
+            // Also try in-memory queue (for local development)
+            const memoryRecovered = await db_service.attemptPartitionRecovery(partition);
+            totalRecovered += memoryRecovered;
             totalRemaining += db_service.missedWrites[partition].length;
             
-            if (recovered > 0) {
-                db_service.recoveryMonitor.stats.totalRecoveries += recovered;
+            if (persistentRecovered + memoryRecovered > 0) {
+                db_service.recoveryMonitor.stats.totalRecoveries += persistentRecovered + memoryRecovered;
                 db_service.recoveryMonitor.stats.lastRecoveryTime = checkTime;
             }
+        }
+
+        // Get persistent queue status for accurate remaining count
+        try {
+            const queueStatus = await db_service.getPersistentQueueStatus();
+            totalRemaining += queueStatus[1] + queueStatus[2];
+        } catch (e) {
+            // Ignore errors, use in-memory count
         }
 
         // Update last result
@@ -119,7 +351,7 @@ class db_service {
     }
 
     /**
-     * Attempt to recover writes for a specific partition
+     * Attempt to recover writes for a specific partition (IN-MEMORY queue)
      * Can be called immediately when a write is queued or by the monitor
      */
     static async attemptPartitionRecovery(partition) {
@@ -1298,10 +1530,20 @@ class db_service {
                     queuedAt: new Date()
                 };
                 
-                db_service.missedWrites[partition].push(missedWrite);
+                // Queue to PERSISTENT database queue (survives serverless restarts)
+                await db_service.queueMissedWrite(partition, insertedId, sql, params, err);
                 queuedWrites.push(partition);
                 
-                logs.push(`  📋 Queued for recovery (Queue size: ${db_service.missedWrites[partition].length})`);
+                // Get updated queue count from persistent storage
+                let queueCount = 1;
+                try {
+                    const queueStatus = await db_service.getPersistentQueueStatus();
+                    queueCount = queueStatus[partition];
+                } catch (e) {
+                    queueCount = db_service.missedWrites[partition].length;
+                }
+                
+                logs.push(`  📋 Queued for recovery (Queue size: ${queueCount})`);
                 
                 replicationResults[partition] = false;
             } finally {
