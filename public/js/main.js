@@ -292,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnLast = document.getElementById('btnLastPage');
         const pageInfo = document.getElementById('pageInfo');
 
-        tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
         try {
             const offset = (currentPage - 1) * pageSize;
             // Added timestamp to prevent caching
@@ -315,6 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <td style="padding:15px;">${uId}</td>
                         <td>${uUsername}</td>
                         <td>${fName} ${lName}</td>
+                        <td>${uCity}</td>
                         <td>${uCountry}</td>
                         <td style="text-align:right;">
                             <div style="display:flex; justify-content:flex-end; gap:5px;">
@@ -325,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </tr>`;
                 });
             } else {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">No more records found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;">No more records found</td></tr>';
             }
 
             // Update Pagination UI
@@ -355,7 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch(e) { 
             console.error(e);
-            tbody.innerHTML = '<tr><td colspan="5">Error loading data</td></tr>'; 
+            tbody.innerHTML = '<tr><td colspan="6">Error loading data</td></tr>'; 
         }
     };
 

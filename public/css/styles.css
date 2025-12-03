@@ -35,14 +35,16 @@ body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #
 label { display: block; font-size: 12px; font-weight: 700; color: #A3AED0; margin-bottom: 5px; margin-left: 5px; }
 
 /* --- BUTTONS --- */
-.btn-primary { background: #4318FF; color: white; padding: 12px 25px; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; transition: 0.2s; display: flex; align-items: center; gap: 8px; }
-.btn-primary:hover { background: #3311CC; transform: translateY(-2px); }
-.btn-soft { width: 35px; height: 35px; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
-.btn-soft-blue { background: #F4F7FE; color: #4318FF; }
+.btn-primary { background: #7C3AED; color: white; padding: 12px 25px; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; transition: 0.2s; display: flex; align-items: center; gap: 8px; }
+.btn-primary:hover { background: #6D28D9; transform: translateY(-2px); }
+.btn-soft { padding: 8px 15px; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: 0.2s; font-size: 13px; font-weight: 500; }
+.btn-soft-blue { background: #F4F7FE; color: #7C3AED; }
+.btn-soft-blue:hover { background: #EDE9FE; }
 .btn-soft-red { background: #FFF5F5; color: #FF5252; }
-.btn-refresh { background: none; border: 1px solid #E0E5F2; color: #2B3674; padding: 8px 15px; border-radius: 30px; cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 5px; transition: 0.2s; }
-.btn-refresh:hover { background: #F4F7FE; }
-.qa-btn { background: rgba(255,255,255,0.2); border: none; padding: 10px; width: 100%; border-radius: 10px; color: white; cursor: pointer; display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; transition: 0.2s; }
+.btn-soft-red:hover { background: #FFE5E5; }
+.btn-refresh { background: #7C3AED; border: none; color: white; padding: 8px 15px; border-radius: 30px; cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 5px; transition: 0.2s; }
+.btn-refresh:hover { background: #6D28D9; }
+.qa-btn { background: rgba(255,255,255,0.2); border: none; padding: 10px; width: 100%; border-radius: 10px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; transition: 0.2s; }
 .qa-btn:hover { background: rgba(255,255,255,0.3); }
 
 /* --- TABLES & LISTS --- */
