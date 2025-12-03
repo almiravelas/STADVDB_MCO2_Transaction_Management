@@ -521,15 +521,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 pendingSection.style.display = 'none';
             }
 
+            // Fetch recovery monitor status
+            const monitorRes = await fetch('/failure/monitor/status');
+            const monitorData = await monitorRes.json();
+            
             // Update last check time
             const lastCheck = document.getElementById('lastCheckTime');
-            if (lastCheck) {
-                lastCheck.innerText = new Date().toLocaleTimeString();
+            if (lastCheck && monitorData.lastCheck) {
+                lastCheck.innerText = new Date(monitorData.lastCheck).toLocaleTimeString();
             }
 
-            // Add to recovery log if there are changes
-            if (totalQueue > 0 || !allOnline) {
-                addRecoveryLog(allOnline, totalQueue, node0Online, node1Online, node2Online);
+            // Update monitor status badge
+            const monitorStatus = document.getElementById('monitorStatus');
+            if (monitorStatus) {
+                if (monitorData.enabled) {
+                    monitorStatus.innerText = 'ACTIVE';
+                    monitorStatus.style.background = '#E2FBD7';
+                    monitorStatus.style.color = '#34B53A';
+                } else {
+                    monitorStatus.innerText = 'STOPPED';
+                    monitorStatus.style.background = '#FFE5E5';
+                    monitorStatus.style.color = '#FF4C4C';
+                }
+            }
+
+            // Add to recovery log based on last result
+            if (monitorData.lastResult) {
+                addRecoveryLog(allOnline, totalQueue, node0Online, node1Online, node2Online, monitorData.lastResult);
+            } else if (totalQueue > 0 || !allOnline) {
+                addRecoveryLog(allOnline, totalQueue, node0Online, node1Online, node2Online, null);
             }
 
         } catch(e) { 
@@ -539,24 +559,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Recovery Log Helper
     const recoveryLogEntries = [];
-    function addRecoveryLog(allOnline, totalQueue, n0, n1, n2) {
+    let lastLogMessage = '';
+    
+    function addRecoveryLog(allOnline, totalQueue, n0, n1, n2, lastResult) {
         const log = document.getElementById('recoveryLog');
         if (!log) return;
         
         const time = new Date().toLocaleTimeString();
         let msg = '';
-        if (!allOnline) {
+        
+        // Show recovery success/progress from monitor
+        if (lastResult && lastResult.message) {
+            msg = `[${time}] ${lastResult.message}`;
+        } else if (!allOnline) {
             const offline = [];
             if (!n0) offline.push('Central');
             if (!n1) offline.push('P1');
             if (!n2) offline.push('P2');
             msg = `[${time}] ⚠️ Node(s) offline: ${offline.join(', ')}`;
-        }
-        if (totalQueue > 0) {
-            msg += msg ? ` | Queue: ${totalQueue}` : `[${time}] 🔄 Queue: ${totalQueue} pending`;
+            if (totalQueue > 0) {
+                msg += ` | Queue: ${totalQueue}`;
+            }
+        } else if (totalQueue > 0) {
+            msg = `[${time}] 🔄 Queue: ${totalQueue} pending`;
+        } else {
+            msg = `[${time}] ✓ All systems operational`;
         }
         
-        if (msg && (recoveryLogEntries.length === 0 || recoveryLogEntries[0] !== msg)) {
+        // Only add if message changed
+        if (msg && msg !== lastLogMessage) {
+            lastLogMessage = msg;
             recoveryLogEntries.unshift(msg);
             if (recoveryLogEntries.length > 20) recoveryLogEntries.pop();
             log.innerHTML = recoveryLogEntries.map(e => `<div style="padding:3px 0; border-bottom:1px solid #e8ecf4;">${e}</div>`).join('');

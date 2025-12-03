@@ -25,6 +25,12 @@ class db_service {
             totalChecks: 0,
             totalRecoveries: 0,
             lastRecoveryTime: null
+        },
+        lastResult: {
+            timestamp: null,
+            recovered: 0,
+            remaining: 0,
+            message: 'No recovery attempts yet'
         }
     };
 
@@ -77,19 +83,38 @@ class db_service {
 
         console.log(`[Recovery Monitor] Check #${db_service.recoveryMonitor.stats.totalChecks} at ${checkTime.toISOString()}`);
 
-        let recoveredAny = false;
+        let totalRecovered = 0;
+        let totalRemaining = 0;
 
         for (let partition of [1, 2]) {
             const recovered = await db_service.attemptPartitionRecovery(partition);
+            totalRecovered += recovered;
+            totalRemaining += db_service.missedWrites[partition].length;
+            
             if (recovered > 0) {
-                recoveredAny = true;
                 db_service.recoveryMonitor.stats.totalRecoveries += recovered;
                 db_service.recoveryMonitor.stats.lastRecoveryTime = checkTime;
             }
         }
 
-        if (!recoveredAny) {
-            console.log("[Recovery Monitor] No recovery operations performed this cycle");
+        // Update last result
+        db_service.recoveryMonitor.lastResult = {
+            timestamp: checkTime,
+            recovered: totalRecovered,
+            remaining: totalRemaining,
+            message: totalRecovered > 0 
+                ? `✓ Recovered ${totalRecovered} write(s). ${totalRemaining} remaining.`
+                : totalRemaining > 0 
+                    ? `Waiting... ${totalRemaining} write(s) pending.`
+                    : '✓ All queues empty. System healthy.'
+        };
+
+        if (totalRecovered > 0) {
+            console.log(`[Recovery Monitor] ✓ Recovered ${totalRecovered} writes this cycle`);
+        } else if (totalRemaining > 0) {
+            console.log(`[Recovery Monitor] ${totalRemaining} writes still pending`);
+        } else {
+            console.log("[Recovery Monitor] All systems operational");
         }
     }
 
@@ -132,35 +157,49 @@ class db_service {
 
             for (let write of db_service.missedWrites[partition]) {
                 try {
-                    // Check for duplicates
-                    const checkSql = "SELECT id FROM users WHERE firstname = ? AND lastname = ? AND country = ? AND createdAt = ?";
+                    // params order: [id, firstname, lastname, city, country, createdAt, updatedAt]
+                    const userId = write.params[0];
+                    
+                    // Check for duplicates by ID
+                    const checkSql = "SELECT id FROM users WHERE id = ?";
                     const [existing] = await db_service.queryWithTimeout(
                         pConn, 
                         checkSql, 
-                        [write.params[0], write.params[1], write.params[3], write.params[4]], 
+                        [userId], 
                         2000
                     );
 
                     if (existing && existing.length > 0) {
-                        console.log(`[Recovery] Skipped duplicate: ${write.params[0]} ${write.params[1]}`);
+                        console.log(`[Recovery] Skipped duplicate ID ${userId}: ${write.params[1]} ${write.params[2]}`);
                         successCount++;
                         continue;
                     }
 
                     // Apply write
                     await db_service.queryWithTimeout(pConn, write.query, write.params, 2000);
-                    console.log(`[Recovery] Recovered: ${write.params[0]} ${write.params[1]}`);
+                    console.log(`[Recovery] ✓ Recovered ID ${userId}: ${write.params[1]} ${write.params[2]}`);
                     successCount++;
 
                 } catch (err) {
+                    console.error(`[Recovery] Error recovering write:`, err.message);
+                    
+                    // Check if it's a duplicate key error - if so, consider it recovered
+                    if (err.code === 'ER_DUP_ENTRY' || err.message.includes('Duplicate entry')) {
+                        console.log(`[Recovery] Duplicate key - already exists, marking as recovered`);
+                        successCount++;
+                        continue;
+                    }
+                    
                     const errorType = db_service.classifyError(err);
                     write.attemptCount++;
                     write.lastError = err.message;
                     write.lastAttempt = new Date();
                     
-                    // Keep retryable errors in queue
-                    if (errorType.type === 'RETRYABLE' || errorType.type === 'UNKNOWN') {
+                    // Keep retryable errors in queue (max 10 attempts)
+                    if ((errorType.type === 'RETRYABLE' || errorType.type === 'UNKNOWN') && write.attemptCount < 10) {
                         remainingWrites.push(write);
+                    } else {
+                        console.log(`[Recovery] Dropping write after ${write.attemptCount} attempts: ${err.message}`);
                     }
                 }
             }
@@ -168,7 +207,7 @@ class db_service {
             db_service.missedWrites[partition] = remainingWrites;
             
             if (successCount > 0) {
-                console.log(`[Recovery] Partition ${partition}: Recovered ${successCount} writes, ${remainingWrites.length} remaining`);
+                console.log(`[Recovery] ✓ Partition ${partition}: Recovered ${successCount} writes, ${remainingWrites.length} remaining`);
             }
 
         } catch (err) {
@@ -189,6 +228,7 @@ class db_service {
             intervalMs: db_service.recoveryMonitor.checkIntervalMs,
             lastCheck: db_service.recoveryMonitor.lastCheckTime,
             stats: db_service.recoveryMonitor.stats,
+            lastResult: db_service.recoveryMonitor.lastResult,
             queueSizes: {
                 central: db_service.missedWrites[0].length,
                 partition1: db_service.missedWrites[1].length,
