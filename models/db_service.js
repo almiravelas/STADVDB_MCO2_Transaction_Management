@@ -865,12 +865,30 @@ class db_service {
     }
 
     // ---------------------------------------------------
-    // CREATE
+    // CREATE - Two-Phase Commit (2PC) with Master-Slave Architecture
+    // ---------------------------------------------------
+    // Architecture:
+    //   - MASTER (Central/Node 0): Single source of truth, handles ID generation
+    //   - SLAVE (Node 1 or 2): Partition based on country (A-L or M-Z)
+    //
+    // ACID Properties:
+    //   - Atomicity: Both Master and Slave commit together or rollback together
+    //   - Consistency: Data is replicated consistently across nodes
+    //   - Isolation: REPEATABLE READ prevents phantom reads
+    //   - Durability: Committed changes are persisted
+    //
+    // 2PC Protocol:
+    //   - PHASE 1 (PREPARE): Set isolation, begin transactions, acquire locks
+    //   - PHASE 2 (COMMIT/ABORT): Commit both if successful, rollback both if any fails
+    //
+    // Pessimistic Locking:
+    //   - SELECT ... FOR UPDATE on ID sequence prevents concurrent ID conflicts
     // ---------------------------------------------------
 
     static async createUser(userData, NODE_STATE = null) {
-        console.log('[DB Service] Creating user:', userData);
-        console.log('[DB Service] NODE_STATE:', NODE_STATE);
+        console.log('[2PC] ===== CREATE USER - Two-Phase Commit =====');
+        console.log('[2PC] User Data:', userData);
+        console.log('[2PC] NODE_STATE:', NODE_STATE);
         
         if (userData.id !== undefined) {
             delete userData.id;
@@ -880,43 +898,61 @@ class db_service {
             throw new Error("Country is required.");
         }
 
-        const centralPool = db_router.getCentralNode();
-        const partitionPool = db_router.getPartitionNode(userData.country);
+        // Get Master (Central) and Slave (Partition) pools
+        const masterPool = db_router.getMasterNode();
+        const slavePool = db_router.getSlaveNode(userData.country);
+        const slaveId = db_router.getSlaveId(userData.country);
 
-        if (!centralPool) {
-            throw new Error("Central node pool is not configured");
+        if (!masterPool) {
+            throw new Error("Master node pool is not configured");
         }
 
-        let centralConn, partitionConn;
+        let masterConn, slaveConn;
+        let masterPrepared = false;
+        let slavePrepared = false;
 
         try {
-            console.log('[DB Service] Getting central connection...');
+            // =========================================================
+            // PHASE 1: PREPARE - Acquire connections and locks
+            // =========================================================
+            console.log('[2PC] PHASE 1: PREPARE');
+            
+            // 1a. Acquire Master connection
+            console.log('[2PC] Acquiring Master (Central) connection...');
             try {
-                centralConn = await Promise.race([
-                    centralPool.getConnection(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Central connection timeout after 5s')), 5000))
+                masterConn = await Promise.race([
+                    masterPool.getConnection(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Master connection timeout after 5s')), 5000))
                 ]);
             } catch (connError) {
-                throw new Error(`Failed to connect to Central Node: ${connError.message}`);
+                throw new Error(`[2PC] PREPARE FAILED - Master unreachable: ${connError.message}`);
             }
             
-            if (!centralConn) {
-                throw new Error("Central connection returned undefined");
+            if (!masterConn) {
+                throw new Error("[2PC] PREPARE FAILED - Master connection undefined");
             }
-            console.log('[DB Service] Central connection acquired');
+            console.log('[2PC] Master connection acquired');
             
-            await centralConn.beginTransaction();
-            console.log('[DB Service] Transaction started on central');
+            // 1b. Set REPEATABLE READ isolation on Master
+            await db_access.setIsolationLevel(masterConn, db_access.DEFAULT_ISOLATION);
+            console.log(`[2PC] Master isolation set to ${db_access.DEFAULT_ISOLATION}`);
+            
+            // 1c. Begin transaction on Master
+            await masterConn.beginTransaction();
+            console.log('[2PC] Master transaction started');
+            masterPrepared = true;
 
-            // 2. AUTO-INCREMENT LOGIC: Get Max ID from Central
-            const [rows] = await centralConn.query(
+            // 1d. PESSIMISTIC LOCK: Lock ID sequence to prevent concurrent inserts
+            // SELECT FOR UPDATE creates exclusive lock on the row
+            console.log('[2PC] Acquiring pessimistic lock on ID sequence...');
+            const [rows] = await masterConn.query(
                 'SELECT id FROM users ORDER BY id DESC LIMIT 1 FOR UPDATE'
             );
             const lastId = rows.length ? rows[0].id : 0;
             const newId = parseInt(lastId) + 1;
-            console.log(`[DB Service] Generated new ID: ${newId}`);
+            console.log(`[2PC] Pessimistic lock acquired. Generated new ID: ${newId}`);
 
-            // 3. Prepare Data
+            // 1e. Prepare Data
             const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
             
             const fullData = {
@@ -928,147 +964,188 @@ class db_service {
                 createdAt: timestamp,
                 updatedAt: timestamp
             };
-            console.log('[DB Service] Full data prepared:', fullData);
+            console.log('[2PC] Data prepared:', fullData);
 
-            // Determine which partition this user goes to using router
-            // Node 1 = A-L countries, Node 2 = M-Z countries
-            const partitionId = db_router.getPartitionId(userData.country);
-            console.log(`[DB Service] User with country "${userData.country}" routes to partition ${partitionId}`);
+            console.log(`[2PC] User with country "${userData.country}" routes to Slave ${slaveId}`);
 
-            // ALWAYS INSERT TO CENTRAL FIRST (before trying partition)
-            console.log('[DB Service] Inserting into central...');
-            await db_access.insertUser(centralConn, fullData);
-            console.log('[DB Service] Central insert complete');
-            
-            await centralConn.commit();
-            console.log('[DB Service] Central commit successful - user now exists in database');
+            // 1f. Insert into Master (still in PREPARE phase, not committed yet)
+            console.log('[2PC] Executing INSERT on Master...');
+            await db_access.insertUser(masterConn, fullData);
+            console.log('[2PC] Master INSERT executed (not committed)');
 
-            // Check if partition is simulated as offline
-            if (NODE_STATE && !NODE_STATE[partitionId]) {
-                console.log(`[DB Service] Partition ${partitionId} is OFFLINE (simulated) - queuing write`);
+            // 1g. Check if Slave is simulated as offline
+            if (NODE_STATE && !NODE_STATE[slaveId]) {
+                console.log(`[2PC] Slave ${slaveId} is OFFLINE (simulated)`);
+                console.log('[2PC] PHASE 2: COMMIT Master, QUEUE Slave write');
                 
-                // Queue the write for partition using PERSISTENT queue
+                // Commit Master since Slave is intentionally offline
+                await masterConn.commit();
+                console.log('[2PC] Master COMMIT successful');
+                masterPrepared = false;
+                
+                // Queue the write for Slave using PERSISTENT queue
                 const sql = 'INSERT INTO users (id, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)';
                 const params = [fullData.id, fullData.firstname, fullData.lastname, fullData.city, fullData.country, fullData.createdAt, fullData.updatedAt];
                 
                 await db_service.queueMissedWrite(
-                    partitionId,
+                    slaveId,
                     fullData.id,
                     sql,
                     params,
                     new Error('Node is OFFLINE (simulated)')
                 );
-                console.log(`[DB Service] Write queued for partition ${partitionId} in persistent queue`);
+                console.log(`[2PC] Write queued for Slave ${slaveId} in persistent queue`);
                 
-                // Get queue count from persistent storage
+                // Get queue count
                 let queueSize = 1;
                 try {
                     const queueStatus = await db_service.getPersistentQueueStatus();
-                    queueSize = queueStatus[partitionId];
+                    queueSize = queueStatus[slaveId];
                 } catch (e) { /* ignore */ }
                 
                 return {
                     success: true,
                     id: newId,
-                    message: `User created with ID ${newId}. Partition ${partitionId} offline - write queued.`,
-                    queuedForPartition: partitionId,
-                    queueSize: queueSize
+                    message: `User created with ID ${newId}. Slave ${slaveId} offline - write queued.`,
+                    queuedForPartition: slaveId,
+                    queueSize: queueSize,
+                    protocol: '2PC',
+                    isolation: db_access.DEFAULT_ISOLATION
                 };
             }
 
-            // Try to get partition connection and replicate
-            console.log('[DB Service] Getting partition connection...');
+            // 1h. Acquire Slave connection and prepare
+            console.log('[2PC] Acquiring Slave connection...');
             try {
-                partitionConn = await Promise.race([
-                    partitionPool.getConnection(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Partition connection timeout')), 3000))
+                slaveConn = await Promise.race([
+                    slavePool.getConnection(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Slave connection timeout')), 3000))
                 ]);
-                console.log('[DB Service] Partition connection acquired');
+                console.log('[2PC] Slave connection acquired');
                 
-                await partitionConn.beginTransaction();
-                console.log('[DB Service] Transaction started on partition');
+                // Set REPEATABLE READ isolation on Slave
+                await db_access.setIsolationLevel(slaveConn, db_access.DEFAULT_ISOLATION);
+                console.log(`[2PC] Slave isolation set to ${db_access.DEFAULT_ISOLATION}`);
+                
+                // Begin transaction on Slave
+                await slaveConn.beginTransaction();
+                console.log('[2PC] Slave transaction started');
+                slavePrepared = true;
 
-                // Insert into partition
-                console.log('[DB Service] Inserting into partition...');
-                await db_access.insertUser(partitionConn, fullData);
-                console.log('[DB Service] Partition insert complete');
-                
-                await partitionConn.commit();
-                console.log('[DB Service] Partition commit successful');
+                // Insert into Slave
+                console.log('[2PC] Executing INSERT on Slave...');
+                await db_access.insertUser(slaveConn, fullData);
+                console.log('[2PC] Slave INSERT executed (not committed)');
                 
             } catch (connError) {
-                console.error(`[DB Service] Failed to replicate to partition ${partitionId}:`, connError.message);
+                console.error(`[2PC] PREPARE FAILED on Slave ${slaveId}:`, connError.message);
                 
-                // PARTITION FAILED - but Central already committed, so queue for later
-                console.log('[DB Service] Central write already committed, queuing partition write in persistent queue');
+                // 2PC ABORT: Rollback Master since Slave failed to prepare
+                console.log('[2PC] PHASE 2: ABORT - Rolling back Master...');
+                if (masterPrepared && masterConn) {
+                    await masterConn.rollback();
+                    masterPrepared = false;
+                    console.log('[2PC] Master ROLLBACK complete');
+                }
                 
-                // Queue the write for partition using PERSISTENT queue
+                // Queue for later recovery
                 const sql = 'INSERT INTO users (id, firstname, lastname, city, country, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)';
                 const params = [fullData.id, fullData.firstname, fullData.lastname, fullData.city, fullData.country, fullData.createdAt, fullData.updatedAt];
                 
-                await db_service.queueMissedWrite(
-                    partitionId,
-                    fullData.id,
-                    sql,
-                    params,
-                    connError
-                );
-                console.log(`[DB Service] Write queued for partition ${partitionId} in persistent queue`);
+                // Re-commit to Master first (for data availability)
+                console.log('[2PC] Re-committing to Master for availability...');
+                await masterConn.beginTransaction();
+                await db_access.insertUser(masterConn, fullData);
+                await masterConn.commit();
                 
-                // Get queue count from persistent storage
+                await db_service.queueMissedWrite(slaveId, fullData.id, sql, params, connError);
+                console.log(`[2PC] Write queued for Slave ${slaveId}`);
+                
                 let queueSize = 1;
                 try {
                     const queueStatus = await db_service.getPersistentQueueStatus();
-                    queueSize = queueStatus[partitionId];
+                    queueSize = queueStatus[slaveId];
                 } catch (e) { /* ignore */ }
                 
                 return {
                     success: true,
                     id: newId,
-                    message: `User created with ID ${newId}. Partition ${partitionId} connection failed - write queued.`,
-                    queuedForPartition: partitionId,
+                    message: `User created with ID ${newId}. Slave ${slaveId} connection failed - write queued.`,
+                    queuedForPartition: slaveId,
                     queueSize: queueSize,
-                    reason: 'REAL_CONNECTION_FAILURE'
+                    reason: 'SLAVE_CONNECTION_FAILURE',
+                    protocol: '2PC',
+                    isolation: db_access.DEFAULT_ISOLATION
                 };
             }
+
+            // =========================================================
+            // PHASE 2: COMMIT - All nodes prepared successfully
+            // =========================================================
+            console.log('[2PC] PHASE 2: COMMIT - All nodes prepared');
+            
+            // Commit Master first
+            console.log('[2PC] Committing Master...');
+            await masterConn.commit();
+            masterPrepared = false;
+            console.log('[2PC] Master COMMIT successful');
+            
+            // Commit Slave
+            console.log('[2PC] Committing Slave...');
+            await slaveConn.commit();
+            slavePrepared = false;
+            console.log('[2PC] Slave COMMIT successful');
+            
+            console.log('[2PC] ===== 2PC COMPLETE: SUCCESS =====');
 
             // Both successful
             return {
                 success: true,
                 id: newId,
-                message: `User created with ID ${newId} in Central and Partition.`
+                message: `User created with ID ${newId} in Master and Slave.`,
+                protocol: '2PC',
+                isolation: db_access.DEFAULT_ISOLATION,
+                locking: 'PESSIMISTIC'
             };
+            
         } catch (error) {
-            console.error("[DB Service] Create Transaction Failed:", error.message);
-            console.error("[DB Service] Error stack:", error.stack);
+            console.error("[2PC] Transaction Failed:", error.message);
+            console.error("[2PC] Error stack:", error.stack);
+            
+            // =========================================================
+            // PHASE 2: ABORT - Rollback all prepared nodes
+            // =========================================================
+            console.log('[2PC] PHASE 2: ABORT - Rolling back all nodes');
             
             try {
-                if (centralConn) {
-                    console.log('[DB Service] Rolling back central...');
-                    await centralConn.rollback();
+                if (masterPrepared && masterConn) {
+                    console.log('[2PC] Rolling back Master...');
+                    await masterConn.rollback();
+                    console.log('[2PC] Master ROLLBACK complete');
                 }
             } catch (rbError) {
-                console.error('[DB Service] Central rollback failed:', rbError.message);
+                console.error('[2PC] Master rollback failed:', rbError.message);
             }
             
             try {
-                if (partitionConn) {
-                    console.log('[DB Service] Rolling back partition...');
-                    await partitionConn.rollback();
+                if (slavePrepared && slaveConn) {
+                    console.log('[2PC] Rolling back Slave...');
+                    await slaveConn.rollback();
+                    console.log('[2PC] Slave ROLLBACK complete');
                 }
             } catch (rbError) {
-                console.error('[DB Service] Partition rollback failed:', rbError.message);
+                console.error('[2PC] Slave rollback failed:', rbError.message);
             }
             
             throw error;
         } finally {
-            if (centralConn) {
-                console.log('[DB Service] Releasing central connection');
-                centralConn.release();
+            if (masterConn) {
+                console.log('[2PC] Releasing Master connection');
+                masterConn.release();
             }
-            if (partitionConn) {
-                console.log('[DB Service] Releasing partition connection');
-                partitionConn.release();
+            if (slaveConn) {
+                console.log('[2PC] Releasing Slave connection');
+                slaveConn.release();
             }
         }
     }
@@ -1076,9 +1153,21 @@ class db_service {
 
 
     // ---------------------------------------------------
-    // UPDATE
+    // UPDATE - Two-Phase Commit (2PC) with Master-Slave Architecture
     // ---------------------------------------------------
+    // Uses same 2PC protocol as CREATE:
+    //   - PHASE 1 (PREPARE): Set REPEATABLE READ, begin transactions, acquire exclusive locks
+    //   - PHASE 2 (COMMIT/ABORT): Commit both if successful, rollback both if any fails
+    //
+    // Pessimistic Locking:
+    //   - SELECT ... FOR UPDATE on the row being updated
+    //   - Prevents concurrent modifications (lost updates)
+    // ---------------------------------------------------
+    
     static async updateUser(id, newData) {
+        console.log('[2PC] ===== UPDATE USER - Two-Phase Commit =====');
+        console.log('[2PC] User ID:', id, 'New Data:', newData);
+        
         // Sanitize data to match 'users' table schema
         const sanitizedData = {};
         if (newData.firstName) sanitizedData.firstname = newData.firstName;
@@ -1091,123 +1180,276 @@ class db_service {
              return { success: true, message: "No valid fields to update." };
         }
 
-        const centralPool = db_router.getCentralNode();
-        let centralConn, partitionConn;
+        const masterPool = db_router.getMasterNode();
+        let masterConn, slaveConn;
+        let masterPrepared = false;
+        let slavePrepared = false;
 
         try {
-            centralConn = await centralPool.getConnection();
-            await centralConn.beginTransaction();
-
-            const user = await db_access.findById(centralConn, id);
-            if (!user) throw new Error(`User with ID ${id} not found.`);
-
-            const partitionPool = db_router.getPartitionNode(user.country);
-            partitionConn = await partitionPool.getConnection();
-            await partitionConn.beginTransaction();
-
-            await db_access.lockRow(centralConn, id);
+            // =========================================================
+            // PHASE 1: PREPARE
+            // =========================================================
+            console.log('[2PC] PHASE 1: PREPARE');
             
-            await db_access.updateUser(centralConn, id, sanitizedData);
-            await db_access.updateUser(partitionConn, id, sanitizedData);
+            // 1a. Acquire Master connection
+            masterConn = await masterPool.getConnection();
+            console.log('[2PC] Master connection acquired');
+            
+            // 1b. Set REPEATABLE READ isolation
+            await db_access.setIsolationLevel(masterConn, db_access.DEFAULT_ISOLATION);
+            console.log(`[2PC] Master isolation set to ${db_access.DEFAULT_ISOLATION}`);
+            
+            // 1c. Begin transaction
+            await masterConn.beginTransaction();
+            masterPrepared = true;
+            console.log('[2PC] Master transaction started');
 
-            await centralConn.commit();
-            await partitionConn.commit();
+            // 1d. Find user and acquire PESSIMISTIC LOCK
+            console.log('[2PC] Acquiring pessimistic lock on user...');
+            const user = await db_access.lockRowExclusive(masterConn, 'users', id);
+            if (!user) throw new Error(`User with ID ${id} not found.`);
+            console.log(`[2PC] Pessimistic lock acquired on user ${id} (${user.country})`);
 
-            return { success: true, message: "User updated successfully." };
+            // 1e. Get Slave pool based on user's country
+            const slavePool = db_router.getSlaveNode(user.country);
+            const slaveId = db_router.getSlaveId(user.country);
+            
+            // 1f. Acquire Slave connection and prepare
+            slaveConn = await slavePool.getConnection();
+            console.log('[2PC] Slave connection acquired');
+            
+            await db_access.setIsolationLevel(slaveConn, db_access.DEFAULT_ISOLATION);
+            console.log(`[2PC] Slave isolation set to ${db_access.DEFAULT_ISOLATION}`);
+            
+            await slaveConn.beginTransaction();
+            slavePrepared = true;
+            console.log('[2PC] Slave transaction started');
+            
+            // 1g. Acquire pessimistic lock on Slave
+            await db_access.lockRowExclusive(slaveConn, 'users', id);
+            console.log('[2PC] Pessimistic lock acquired on Slave');
+
+            // 1h. Execute UPDATE on both nodes (not committed yet)
+            console.log('[2PC] Executing UPDATE on Master...');
+            await db_access.updateUser(masterConn, id, sanitizedData);
+            console.log('[2PC] Master UPDATE executed');
+            
+            console.log('[2PC] Executing UPDATE on Slave...');
+            await db_access.updateUser(slaveConn, id, sanitizedData);
+            console.log('[2PC] Slave UPDATE executed');
+
+            // =========================================================
+            // PHASE 2: COMMIT
+            // =========================================================
+            console.log('[2PC] PHASE 2: COMMIT');
+            
+            await masterConn.commit();
+            masterPrepared = false;
+            console.log('[2PC] Master COMMIT successful');
+            
+            await slaveConn.commit();
+            slavePrepared = false;
+            console.log('[2PC] Slave COMMIT successful');
+            
+            console.log('[2PC] ===== 2PC UPDATE COMPLETE: SUCCESS =====');
+
+            return { 
+                success: true, 
+                message: "User updated successfully.",
+                protocol: '2PC',
+                isolation: db_access.DEFAULT_ISOLATION,
+                locking: 'PESSIMISTIC'
+            };
+            
         } catch (error) {
-            if (centralConn) await centralConn.rollback();
-            if (partitionConn) await partitionConn.rollback();
+            console.error('[2PC] Update failed:', error.message);
+            
+            // PHASE 2: ABORT
+            console.log('[2PC] PHASE 2: ABORT');
+            
+            if (masterPrepared && masterConn) {
+                await masterConn.rollback();
+                console.log('[2PC] Master ROLLBACK complete');
+            }
+            if (slavePrepared && slaveConn) {
+                await slaveConn.rollback();
+                console.log('[2PC] Slave ROLLBACK complete');
+            }
             throw error;
         } finally {
-            if (centralConn) centralConn.release();
-            if (partitionConn) partitionConn.release();
+            if (masterConn) masterConn.release();
+            if (slaveConn) slaveConn.release();
         }
     }
 
     // ---------------------------------------------------
-    // DELETE
+    // DELETE - Two-Phase Commit (2PC) with Master-Slave Architecture
     // ---------------------------------------------------
+    // Uses same 2PC protocol as CREATE/UPDATE:
+    //   - PHASE 1 (PREPARE): Set REPEATABLE READ, begin transactions, acquire exclusive locks
+    //   - PHASE 2 (COMMIT/ABORT): Commit both if successful, rollback both if any fails
+    //
+    // Pessimistic Locking:
+    //   - SELECT ... FOR UPDATE on the row being deleted
+    //   - Prevents concurrent modifications during delete
+    // ---------------------------------------------------
+    
     static async deleteUser(id, countryHint = null) {
-        console.log(`[DB Service] Attempting to delete user ${id}. Hint: ${countryHint}`);
-        const centralPool = db_router.getCentralNode();
-        let centralConn, partitionConn;
+        console.log('[2PC] ===== DELETE USER - Two-Phase Commit =====');
+        console.log(`[2PC] User ID: ${id}, Country Hint: ${countryHint}`);
+        
+        const masterPool = db_router.getMasterNode();
+        let masterConn, slaveConn;
+        let masterPrepared = false;
+        let slavePrepared = false;
 
         try {
-            centralConn = await centralPool.getConnection();
-            await centralConn.beginTransaction();
+            // =========================================================
+            // PHASE 1: PREPARE
+            // =========================================================
+            console.log('[2PC] PHASE 1: PREPARE');
+            
+            // 1a. Acquire Master connection
+            masterConn = await masterPool.getConnection();
+            console.log('[2PC] Master connection acquired');
+            
+            // 1b. Set REPEATABLE READ isolation
+            await db_access.setIsolationLevel(masterConn, db_access.DEFAULT_ISOLATION);
+            console.log(`[2PC] Master isolation set to ${db_access.DEFAULT_ISOLATION}`);
+            
+            // 1c. Begin transaction
+            await masterConn.beginTransaction();
+            masterPrepared = true;
+            console.log('[2PC] Master transaction started');
 
-            let user = await db_access.findById(centralConn, id);
+            // 1d. Find user and determine target country
+            let user = await db_access.findById(masterConn, id);
             let targetCountry = countryHint;
 
             if (!user) {
-                console.warn(`[DB Service] User ${id} not found in Central Node.`);
+                console.warn(`[2PC] User ${id} not found in Master.`);
                 if (!countryHint) {
-                    throw new Error(`User with ID ${id} not found in Central Node and no country hint provided.`);
+                    throw new Error(`User with ID ${id} not found in Master and no country hint provided.`);
                 }
-                console.log(`[DB Service] Using country hint '${countryHint}' to attempt partition cleanup.`);
+                console.log(`[2PC] Using country hint '${countryHint}' for Slave lookup.`);
             } else {
-                console.log(`[DB Service] User found in Central: ${user.username}, Country: ${user.country}`);
+                console.log(`[2PC] User found: ${user.firstname} ${user.lastname}, Country: ${user.country}`);
                 targetCountry = user.country;
             }
 
-            const partitionPool = db_router.getPartitionNode(targetCountry);
-            partitionConn = await partitionPool.getConnection();
-            await partitionConn.beginTransaction();
-
-            // Always attempt to delete from Central, even if findById failed.
-            // This handles cases where the record exists but findById missed it (e.g. type mismatch)
-            // or if we are cleaning up a ghost record.
+            // 1e. Acquire PESSIMISTIC LOCK on Master
             if (user) {
-                await db_access.lockRow(centralConn, id);
+                console.log('[2PC] Acquiring pessimistic lock on Master...');
+                await db_access.lockRowExclusive(masterConn, 'users', id);
+                console.log('[2PC] Pessimistic lock acquired on Master');
             }
-            
-            console.log(`[DB Service] Deleting from Central...`);
-            const centralResult = await db_access.deleteUser(centralConn, id);
-            console.log(`[DB Service] Central Delete Result: Affected Rows = ${centralResult.affectedRows}`);
-            
-            console.log(`[DB Service] Deleting from Partition (${targetCountry})...`);
-            const partitionResult = await db_access.deleteUser(partitionConn, id);
-            console.log(`[DB Service] Partition Delete Result: Affected Rows = ${partitionResult.affectedRows}`);
 
-            await centralConn.commit();
-            await partitionConn.commit();
-            console.log(`[DB Service] Delete successful.`);
+            // 1f. Get Slave pool based on country
+            const slavePool = db_router.getSlaveNode(targetCountry);
+            const slaveId = db_router.getSlaveId(targetCountry);
+            
+            // 1g. Acquire Slave connection and prepare
+            slaveConn = await slavePool.getConnection();
+            console.log('[2PC] Slave connection acquired');
+            
+            await db_access.setIsolationLevel(slaveConn, db_access.DEFAULT_ISOLATION);
+            console.log(`[2PC] Slave isolation set to ${db_access.DEFAULT_ISOLATION}`);
+            
+            await slaveConn.beginTransaction();
+            slavePrepared = true;
+            console.log('[2PC] Slave transaction started');
+            
+            // 1h. Acquire pessimistic lock on Slave (if row exists)
+            try {
+                await db_access.lockRowExclusive(slaveConn, 'users', id);
+                console.log('[2PC] Pessimistic lock acquired on Slave');
+            } catch (e) {
+                console.log('[2PC] Row may not exist on Slave, proceeding...');
+            }
 
-            return { success: true, message: "User deleted." };
+            // 1i. Execute DELETE on both nodes (not committed yet)
+            console.log('[2PC] Executing DELETE on Master...');
+            const masterResult = await db_access.deleteUser(masterConn, id);
+            console.log(`[2PC] Master DELETE executed. Affected rows: ${masterResult.affectedRows}`);
+            
+            console.log('[2PC] Executing DELETE on Slave...');
+            const slaveResult = await db_access.deleteUser(slaveConn, id);
+            console.log(`[2PC] Slave DELETE executed. Affected rows: ${slaveResult.affectedRows}`);
+
+            // =========================================================
+            // PHASE 2: COMMIT
+            // =========================================================
+            console.log('[2PC] PHASE 2: COMMIT');
+            
+            await masterConn.commit();
+            masterPrepared = false;
+            console.log('[2PC] Master COMMIT successful');
+            
+            await slaveConn.commit();
+            slavePrepared = false;
+            console.log('[2PC] Slave COMMIT successful');
+            
+            console.log('[2PC] ===== 2PC DELETE COMPLETE: SUCCESS =====');
+
+            return { 
+                success: true, 
+                message: "User deleted.",
+                protocol: '2PC',
+                isolation: db_access.DEFAULT_ISOLATION,
+                locking: 'PESSIMISTIC'
+            };
+            
         } catch (error) {
-            console.error(`[DB Service] Delete failed:`, error);
-            if (centralConn) await centralConn.rollback();
-            if (partitionConn) await partitionConn.rollback();
+            console.error(`[2PC] Delete failed:`, error);
+            
+            // PHASE 2: ABORT
+            console.log('[2PC] PHASE 2: ABORT');
+            
+            if (masterPrepared && masterConn) {
+                await masterConn.rollback();
+                console.log('[2PC] Master ROLLBACK complete');
+            }
+            if (slavePrepared && slaveConn) {
+                await slaveConn.rollback();
+                console.log('[2PC] Slave ROLLBACK complete');
+            }
             throw error;
         } finally {
-            if (centralConn) centralConn.release();
-            if (partitionConn) partitionConn.release();
+            if (masterConn) masterConn.release();
+            if (slaveConn) slaveConn.release();
         }
     }
 
     // =========================================================
-    // CONCURRENCY SIMULATION
+    // CONCURRENCY SIMULATION - 2PC with Pessimistic Locking
     // =========================================================
+    // This simulates concurrent transactions using:
+    //   - Master-Slave Architecture
+    //   - REPEATABLE READ (or user-specified isolation)
+    //   - Pessimistic Locking (FOR UPDATE)
+    //   - 2PC Protocol
+    // =========================================================
+    
     static async simulateTransaction({ id, type, isolation, sleepTime, updateText }) {
-        const centralPool = db_router.getCentralNode();
-        let centralConn, partitionConn;
+        const masterPool = db_router.getMasterNode();
+        let masterConn, slaveConn;
         let logs = [];
         const startTime = Date.now();
+        let masterPrepared = false;
+        let slavePrepared = false;
 
         try {
-            centralConn = await centralPool.getConnection();
+            masterConn = await masterPool.getConnection();
 
             // -----------------------------------------------------
             // STEP 1: RESOLVE TARGET ID (User Input vs. Random)
             // -----------------------------------------------------
-            let targetId = id; // Start with the input provided by the user
+            let targetId = id;
 
-            // If the ID is Missing (undefined/null/empty) OR explicitly 'random'
             if (!targetId || targetId === 'random') {
                 logs.push(`[${Date.now() - startTime}ms] No specific ID provided. Selecting a RANDOM user...`);
                 
-                // Query to get one random ID
-                const [rows] = await centralConn.query('SELECT id FROM users ORDER BY RAND() LIMIT 1');
+                const [rows] = await masterConn.query('SELECT id FROM users ORDER BY RAND() LIMIT 1');
                 
                 if (rows.length === 0) throw new Error("Database is empty. Cannot simulate.");
                 targetId = rows[0].id;
@@ -1217,95 +1459,116 @@ class db_service {
             }
 
             // -----------------------------------------------------
-            // STEP 2: VERIFY USER & DETERMINE PARTITION
+            // STEP 2: VERIFY USER & DETERMINE SLAVE
             // -----------------------------------------------------
-            // We use the central connection to check existence and get the country
-            const user = await db_access.findById(centralConn, targetId); 
+            const user = await db_access.findById(masterConn, targetId); 
             
             if(!user) {
                 throw new Error(`User with ID ${targetId} does not exist.`);
             }
 
-            // Route to the correct partition based on the user's country
-            const partitionPool = db_router.getPartitionNode(user.country);
-            partitionConn = await partitionPool.getConnection();
+            // Route to the correct Slave based on the user's country
+            const slavePool = db_router.getSlaveNode(user.country);
+            const slaveId = db_router.getSlaveId(user.country);
+            slaveConn = await slavePool.getConnection();
 
-            logs.push(`[${Date.now() - startTime}ms] Connections Acquired for User ${targetId} (${user.country}).`);
-
-            // -----------------------------------------------------
-            // STEP 3: CONFIGURE ISOLATION LEVELS
-            // -----------------------------------------------------
-            await db_access.setIsolationLevel(centralConn, isolation);
-            await db_access.setIsolationLevel(partitionConn, isolation);
-            logs.push(`[${Date.now() - startTime}ms] Isolation set to ${isolation}`);
+            logs.push(`[${Date.now() - startTime}ms] Master-Slave connections acquired for User ${targetId} (${user.country} → Slave ${slaveId}).`);
 
             // -----------------------------------------------------
-            // STEP 4: START TRANSACTION
+            // STEP 3: PHASE 1 - PREPARE (Set Isolation, Begin Transactions)
             // -----------------------------------------------------
-            await centralConn.beginTransaction();
-            await partitionConn.beginTransaction();
-            logs.push(`[${Date.now() - startTime}ms] Transaction Started.`);
+            logs.push(`[${Date.now() - startTime}ms] [2PC] PHASE 1: PREPARE`);
+            
+            // Use user-specified isolation or default to REPEATABLE READ
+            const isolationLevel = isolation || db_access.DEFAULT_ISOLATION;
+            
+            await db_access.setIsolationLevel(masterConn, isolationLevel);
+            await db_access.setIsolationLevel(slaveConn, isolationLevel);
+            logs.push(`[${Date.now() - startTime}ms] Isolation set to ${isolationLevel} on both nodes`);
+
+            await masterConn.beginTransaction();
+            masterPrepared = true;
+            await slaveConn.beginTransaction();
+            slavePrepared = true;
+            logs.push(`[${Date.now() - startTime}ms] Transactions started on Master and Slave`);
 
             // -----------------------------------------------------
-            // STEP 5: PERFORM ACTION (READ or WRITE)
+            // STEP 4: PERFORM ACTION (READ or WRITE) with Pessimistic Locking
             // -----------------------------------------------------
             if (type === 'WRITE') {
+                // Acquire PESSIMISTIC LOCK before writing
+                logs.push(`[${Date.now() - startTime}ms] Acquiring pessimistic locks (FOR UPDATE)...`);
+                await db_access.lockRowExclusive(masterConn, 'users', targetId);
+                await db_access.lockRowExclusive(slaveConn, 'users', targetId);
+                logs.push(`[${Date.now() - startTime}ms] Pessimistic locks acquired on both nodes`);
+                
                 const newData = { firstname: updateText || `UPDATED_${Date.now()}` };
                 
                 // Perform update on both nodes
-                await db_access.updateUser(centralConn, targetId, newData);
-                await db_access.updateUser(partitionConn, targetId, newData);
+                await db_access.updateUser(masterConn, targetId, newData);
+                await db_access.updateUser(slaveConn, targetId, newData);
                 
                 logs.push(`[${Date.now() - startTime}ms] WRITE executed (Data: ${newData.firstname}). Sleeping for ${sleepTime}s...`);
             } else {
-                // READ
-                const result = await db_access.findById(centralConn, targetId);
+                // READ - Use shared lock or no lock depending on isolation
+                const result = await db_access.findById(masterConn, targetId);
                 
-                // 1. Handle Array vs Object
                 const userRow = Array.isArray(result) ? result[0] : result;
-                
-                // 2. Extract Name (using the correct lowercase 'firstname')
-                // We check 'firstname' (from DB) OR 'firstName' (just in case)
                 const nameVal = userRow ? (userRow.firstname || userRow.firstName || 'Unknown') : 'NULL';
 
                 logs.push(`[${Date.now() - startTime}ms] READ executed. Value: ${nameVal}. Sleeping for ${sleepTime}s...`);
             }
 
             // -----------------------------------------------------
-            // STEP 6: SLEEP (Simulate heavy load / hold locks)
+            // STEP 5: SLEEP (Simulate heavy load / hold locks)
             // -----------------------------------------------------
             await sleep(sleepTime * 1000);
 
             // -----------------------------------------------------
-            // STEP 7: COMMIT
+            // STEP 6: PHASE 2 - COMMIT
             // -----------------------------------------------------
-            await centralConn.commit();
-            await partitionConn.commit();
-            logs.push(`[${Date.now() - startTime}ms] COMMIT Successful.`);
+            logs.push(`[${Date.now() - startTime}ms] [2PC] PHASE 2: COMMIT`);
+            
+            await masterConn.commit();
+            masterPrepared = false;
+            logs.push(`[${Date.now() - startTime}ms] Master COMMIT successful`);
+            
+            await slaveConn.commit();
+            slavePrepared = false;
+            logs.push(`[${Date.now() - startTime}ms] Slave COMMIT successful`);
 
             return {
                 success: true,
-                targetId: targetId, // Return the ID used so the UI knows
+                targetId: targetId,
                 logs: logs,
-                finalStatus: "Committed"
+                finalStatus: "Committed",
+                protocol: '2PC',
+                isolation: isolationLevel,
+                locking: type === 'WRITE' ? 'PESSIMISTIC' : 'SHARED'
             };
 
         } catch (error) {
-            // 1. Log the ORIGINAL error (This is what we need to see!)
             logs.push(`[ERROR] Transaction Failed: ${error.message}`);
+            logs.push(`[2PC] PHASE 2: ABORT - Rolling back...`);
             
-            // 2. Safe Rollback - Central
+            // Safe Rollback - Master
             try {
-                if (centralConn) await centralConn.rollback();
+                if (masterPrepared && masterConn) {
+                    await masterConn.rollback();
+                    logs.push(`[${Date.now() - startTime}ms] Master ROLLBACK complete`);
+                }
             } catch (rbError) {
-                logs.push(`[WARNING] Central Rollback failed (Connection likely dead): ${rbError.message}`);
+                logs.push(`[WARNING] Master Rollback failed: ${rbError.message}`);
             }
 
-            // 3. Safe Rollback - Partition
+            // Safe Rollback - Slave
             try {
-                if (partitionConn) await partitionConn.rollback();
+                if (slavePrepared && slaveConn) {
+                    await slaveConn.rollback();
+                    logs.push(`[${Date.now() - startTime}ms] Slave ROLLBACK complete`);
+                }
             } catch (rbError) {
-                logs.push(`[WARNING] Partition Rollback failed: ${rbError.message}`);
+                logs.push(`[WARNING] Slave Rollback failed: ${rbError.message}`);
             }
 
             return {
@@ -1313,7 +1576,10 @@ class db_service {
                 logs: logs,
                 error: error.message
             };
-        }    
+        } finally {
+            if (masterConn) masterConn.release();
+            if (slaveConn) slaveConn.release();
+        }
     }
 
     // =========================================================
