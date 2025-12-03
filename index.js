@@ -80,6 +80,21 @@ app.get('/api/debug', async (req, res) => {
 //  PART 1: DISTRIBUTED TRANSACTION ENDPOINTS
 // ==========================================
 
+// GET USERS (with optional limit for dashboard preview)
+app.get('/api/users', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 10;
+        const centralPool = require('./db/connection').node0;
+        const conn = await centralPool.getConnection();
+        const [rows] = await conn.query('SELECT * FROM users ORDER BY id DESC LIMIT ?', [limit]);
+        conn.release();
+        res.json({ success: true, users: rows });
+    } catch (error) {
+        console.error('[API] Get users error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // 1. CREATE USER
 app.post('/api/users', async (req, res) => {
     try {

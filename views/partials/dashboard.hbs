@@ -10,12 +10,20 @@
                         </div>
                         <div class="card-pink">
                             <h3 style="font-size:16px; margin:0 0 10px 0;">Quick Actions</h3>
-                            <button class="qa-btn" onclick="document.querySelector('[data-view=concurrency]').click()">
-                                <i class='bx bx-test-tube' style="font-size:20px;"></i> <span>Concurrency Test</span>
-                            </button>
-                            <button class="qa-btn" onclick="document.querySelector('[data-view=country]').click()">
-                                <i class='bx bx-map' style="font-size:20px;"></i> <span>Filter Country</span>
-                            </button>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                                <button class="qa-btn" onclick="document.querySelector('[data-view=concurrency]').click()">
+                                    <i class='bx bx-test-tube' style="font-size:18px;"></i> <span>Concurrency</span>
+                                </button>
+                                <button class="qa-btn" onclick="document.querySelector('[data-view=search]').click()">
+                                    <i class='bx bx-search' style="font-size:18px;"></i> <span>Search User</span>
+                                </button>
+                                <button class="qa-btn" onclick="document.querySelector('[data-view=failure]').click()">
+                                    <i class='bx bx-shield-x' style="font-size:18px;"></i> <span>Failure Test</span>
+                                </button>
+                                <button class="qa-btn" onclick="document.querySelector('[data-view=country]').click()">
+                                    <i class='bx bx-map' style="font-size:18px;"></i> <span>By Country</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="card-clean" style="height:300px;">
@@ -31,7 +39,33 @@
                         <h3 style="font-size:16px; margin:0;">Activity Log</h3>
                         <button onclick="clearHistory()" style="border:none; background:none; color:#FF6B9D; cursor:pointer; font-weight:600; font-size:12px;">Clear</button>
                     </div>
-                    <div id="transactionList"><p style="color:#aaa; text-align:center; font-size:12px;">No recent activity</p></div>
+                    <div id="transactionList" style="max-height:400px; overflow-y:auto;"><p style="color:#aaa; text-align:center; font-size:12px;">No recent activity</p></div>
+                </div>
+            </div>
+            
+            <!-- View All Data Preview Section -->
+            <div class="card-clean" style="margin-top:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <h3 style="color:#2B3674; font-size:18px; margin:0;"><i class='bx bxs-folder' style="color:#7C3AED; margin-right:8px;"></i>Recent Users</h3>
+                    <button class="btn-refresh" onclick="document.querySelector('[data-view=viewall]').click()">
+                        <i class='bx bx-right-arrow-alt'></i> View All
+                    </button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table" id="dashboardPreviewTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>City</th>
+                                <th>Country</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashboardPreviewBody">
+                            <tr><td colspan="5" style="text-align:center; color:#aaa;">Loading...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </section>

@@ -643,12 +643,43 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     renderHistory();
     updateStats();
+    loadDashboardPreview();
     
     // Auto-refresh stats every 5 seconds to show queue changes from automatic recovery
     setInterval(() => {
         console.log('[Auto-refresh] Updating stats...');
         updateStats();
     }, 5000);
+
+    // Load dashboard preview table (recent 10 users)
+    async function loadDashboardPreview() {
+        try {
+            const res = await fetch('/api/users?limit=10');
+            const data = await res.json();
+            const tbody = document.getElementById('dashboardPreviewBody');
+            if (!tbody) return;
+            
+            if (data.success && data.users && data.users.length > 0) {
+                tbody.innerHTML = data.users.map(u => `
+                    <tr>
+                        <td>${u.id || u.ID || '--'}</td>
+                        <td>${u.firstname || u.firstName || ''} ${u.lastname || u.lastName || ''}</td>
+                        <td>${u.city || u.City || '--'}</td>
+                        <td>${u.country || u.Country || '--'}</td>
+                        <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '--'}</td>
+                    </tr>
+                `).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#aaa;">No data available</td></tr>';
+            }
+        } catch (e) {
+            console.error('Failed to load dashboard preview:', e);
+            const tbody = document.getElementById('dashboardPreviewBody');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#aaa;">Failed to load</td></tr>';
+            }
+        }
+    }
 
     // 7. SEARCH FUNCTIONALITY
     const searchForm = document.getElementById('searchForm');
