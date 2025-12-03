@@ -37,10 +37,17 @@ app.get('/', (req, res) => {
 // 1. CREATE USER
 app.post('/api/users', async (req, res) => {
     try {
+        console.log('[API] Creating user:', req.body);
         const result = await db_service.createUser(req.body);
+        console.log('[API] Create result:', result);
         res.json(result);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('[API] Create user error:', error);
+        res.status(500).json({ 
+            success: false,
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 

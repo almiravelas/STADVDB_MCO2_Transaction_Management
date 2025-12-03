@@ -572,11 +572,15 @@ class db_service {
     // ---------------------------------------------------
 
     static async createUser(userData) {
+        console.log('[DB Service] Creating user:', userData);
+        
         if (userData.id !== undefined) {
             delete userData.id;
         }
         
-        if (!userData.country) throw new Error("Country is required.");
+        if (!userData.country) {
+            throw new Error("Country is required.");
+        }
 
         const centralPool = db_router.getCentralNode();
         const partitionPool = db_router.getPartitionNode(userData.country);
@@ -584,15 +588,23 @@ class db_service {
         let centralConn, partitionConn;
 
         try {
-            centralConn = await centralPool.getConnection();
+            console.log('[DB Service] Getting central connection...');
+            centralConn = await Promise.race([
+                centralPool.getConnection(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Central connection timeout')), 5000))
+            ]);
+            console.log('[DB Service] Central connection acquired');
+            
             await centralConn.beginTransaction();
+            console.log('[DB Service] Transaction started on central');
 
             // 2. AUTO-INCREMENT LOGIC: Get Max ID from Central
             const [rows] = await centralConn.query(
                 'SELECT id FROM users ORDER BY id DESC LIMIT 1 FOR UPDATE'
             );
             const lastId = rows.length ? rows[0].id : 0;
-            const newId = parseInt(lastId) + 1; // Ensure it's an integer
+            const newId = parseInt(lastId) + 1;
+            console.log(`[DB Service] Generated new ID: ${newId}`);
 
             // 3. Prepare Data
             const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -606,18 +618,32 @@ class db_service {
                 createdAt: timestamp,
                 updatedAt: timestamp
             };
+            console.log('[DB Service] Full data prepared:', fullData);
 
-            partitionConn = await partitionPool.getConnection();
+            console.log('[DB Service] Getting partition connection...');
+            partitionConn = await Promise.race([
+                partitionPool.getConnection(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Partition connection timeout')), 5000))
+            ]);
+            console.log('[DB Service] Partition connection acquired');
+            
             await partitionConn.beginTransaction();
-
-            console.log(`[Transaction] Creating User ID: ${newId} in ${userData.country}`);
+            console.log('[DB Service] Transaction started on partition');
 
             // 4. Insert into both nodes
+            console.log('[DB Service] Inserting into central...');
             await db_access.insertUser(centralConn, fullData);
+            console.log('[DB Service] Central insert complete');
+            
+            console.log('[DB Service] Inserting into partition...');
             await db_access.insertUser(partitionConn, fullData);
+            console.log('[DB Service] Partition insert complete');
 
+            console.log('[DB Service] Committing central...');
             await centralConn.commit();
+            console.log('[DB Service] Committing partition...');
             await partitionConn.commit();
+            console.log('[DB Service] Both commits successful');
 
             return {
                 success: true,
@@ -625,13 +651,37 @@ class db_service {
                 message: `User created with ID ${newId} in Central and Partition.`
             };
         } catch (error) {
-            console.error("Create Transaction Failed:", error.message);
-            if (centralConn) await centralConn.rollback();
-            if (partitionConn) await partitionConn.rollback();
+            console.error("[DB Service] Create Transaction Failed:", error.message);
+            console.error("[DB Service] Error stack:", error.stack);
+            
+            try {
+                if (centralConn) {
+                    console.log('[DB Service] Rolling back central...');
+                    await centralConn.rollback();
+                }
+            } catch (rbError) {
+                console.error('[DB Service] Central rollback failed:', rbError.message);
+            }
+            
+            try {
+                if (partitionConn) {
+                    console.log('[DB Service] Rolling back partition...');
+                    await partitionConn.rollback();
+                }
+            } catch (rbError) {
+                console.error('[DB Service] Partition rollback failed:', rbError.message);
+            }
+            
             throw error;
         } finally {
-            if (centralConn) centralConn.release();
-            if (partitionConn) partitionConn.release();
+            if (centralConn) {
+                console.log('[DB Service] Releasing central connection');
+                centralConn.release();
+            }
+            if (partitionConn) {
+                console.log('[DB Service] Releasing partition connection');
+                partitionConn.release();
+            }
         }
     }
 
