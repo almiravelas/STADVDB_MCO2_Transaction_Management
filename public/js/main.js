@@ -197,12 +197,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = document.getElementById('userId').disabled ? `/api/users/${id}` : '/api/users';
         
         try {
-            await fetch(url, { method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+            const response = await fetch(url, { method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+            const result = await response.json();
+            
             addTransaction(method === 'POST' ? 'add' : 'edit', data.firstName);
-            alert("Success!");
+            
+            // Show detailed success message
+            if (result.queuedForPartition) {
+                alert(`Success! User added to Central Node.\nPartition ${result.queuedForPartition} is offline - write queued for recovery.\nQueue size: ${result.queueSize}`);
+            } else {
+                alert("Success! User added to all nodes.");
+            }
+            
             modal.style.display='none';
-            updateStats();
-            if(document.getElementById('viewall-section').classList.contains('active')) loadAllData();
+            await updateStats();
+            
+            // Always reload data after add/edit to show the new user
+            await loadAllData();
         } catch(e) { alert("Error: " + e.message); }
     };
 
@@ -407,9 +418,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             };
-            updateQueue('node0Queue', queueData.node0 || 0);
-            updateQueue('node1Queue', queueData.node1 || 0);
-            updateQueue('node2Queue', queueData.node2 || 0);
+            updateQueue('node0Queue', queueData.central || 0);
+            updateQueue('node1Queue', queueData.partition1 || 0);
+            updateQueue('node2Queue', queueData.partition2 || 0);
         } catch(e) {}
     };
 
