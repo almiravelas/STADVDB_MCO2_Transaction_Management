@@ -30,6 +30,40 @@ app.get('/', (req, res) => {
   res.render('index');
 });
 
+// Health check with detailed diagnostics
+app.get('/api/debug', async (req, res) => {
+    try {
+        const results = {
+            environment: process.env.NODE_ENV,
+            timestamp: new Date().toISOString(),
+            nodes: {}
+        };
+
+        // Test each node connection
+        for (let i = 0; i <= 2; i++) {
+            try {
+                const pool = db_router.getNodeById(i);
+                const conn = await pool.getConnection();
+                const [rows] = await conn.query('SELECT COUNT(*) as count FROM users');
+                conn.release();
+                results.nodes[`node${i}`] = {
+                    status: 'connected',
+                    userCount: rows[0].count
+                };
+            } catch (error) {
+                results.nodes[`node${i}`] = {
+                    status: 'error',
+                    error: error.message
+                };
+            }
+        }
+
+        res.json(results);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ==========================================
 //  PART 1: DISTRIBUTED TRANSACTION ENDPOINTS
 // ==========================================
