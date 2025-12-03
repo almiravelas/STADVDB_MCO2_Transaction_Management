@@ -38,14 +38,23 @@ app.get('/api/debug', async (req, res) => {
         const results = {
             environment: process.env.NODE_ENV,
             timestamp: new Date().toISOString(),
+            envCheck: {
+                NODE0_HOST: process.env.NODE0_HOST ? 'SET' : 'MISSING',
+                NODE0_PORT: process.env.NODE0_PORT ? 'SET' : 'MISSING',
+                NODE1_HOST: process.env.NODE1_HOST ? 'SET' : 'MISSING',
+                NODE2_HOST: process.env.NODE2_HOST ? 'SET' : 'MISSING',
+            },
             nodes: {}
         };
 
-        // Test each node connection
+        // Test each node connection with timeout
         for (let i = 0; i <= 2; i++) {
             try {
                 const pool = db_router.getNodeById(i);
-                const conn = await pool.getConnection();
+                const conn = await Promise.race([
+                    pool.getConnection(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout after 5s')), 5000))
+                ]);
                 const [rows] = await conn.query('SELECT COUNT(*) as count FROM users');
                 conn.release();
                 results.nodes[`node${i}`] = {
@@ -55,7 +64,8 @@ app.get('/api/debug', async (req, res) => {
             } catch (error) {
                 results.nodes[`node${i}`] = {
                     status: 'error',
-                    error: error.message
+                    error: error.message,
+                    code: error.code
                 };
             }
         }
