@@ -4,9 +4,45 @@ const db_access = require('../models/db_access');
 // For pausing execution
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * =============================================================================
+ * MASTER-SLAVE REPLICATION ARCHITECTURE
+ * =============================================================================
+ * 
+ * TOPOLOGY:
+ *   MASTER (Central Node 0) ──writes──▶ SLAVE 1 (Partition A-L)
+ *                          └──writes──▶ SLAVE 2 (Partition M-Z)
+ * 
+ * DATA FLOW:
+ *   - ALL writes originate at the MASTER (Central Node)
+ *   - MASTER replicates writes to the appropriate SLAVE partition
+ *   - Reads can be served from MASTER (authoritative) or SLAVES (eventually consistent)
+ * 
+ * FAILURE HANDLING:
+ *   - The MASTER is the single authoritative source for all writes
+ *   - The `recovery_queue` table resides ONLY on the MASTER
+ *   - When a SLAVE is unavailable, writes are queued on the MASTER
+ *   - The MASTER owns all retry logic and recovery orchestration
+ *   - This maintains consistency and avoids confusion about which node owns retries
+ * 
+ * RECOVERY PROCESS:
+ *   1. Write fails to replicate to SLAVE → Queue entry created on MASTER
+ *   2. Background monitor runs on MASTER checking SLAVE health
+ *   3. When SLAVE comes online, MASTER replays queued writes
+ *   4. Successful replays are marked complete in MASTER's queue
+ * 
+ * WHY MASTER OWNS THE QUEUE:
+ *   - Single source of truth for pending writes
+ *   - No distributed coordination needed for retry logic
+ *   - Consistent view of what data needs replication
+ *   - Simpler failure recovery without split-brain scenarios
+ * 
+ * =============================================================================
+ */
+
 class db_service {
 
-    // In-memory queue for fallback (still useful for local testing)
+    // In-memory queue for fallback (only used when MASTER DB is also down)
     // Structure: { 0: [], 1: [], 2: [] }
     static missedWrites = {
         0: [],
@@ -35,18 +71,33 @@ class db_service {
     };
 
     // =========================================================
-    // PERSISTENT QUEUE METHODS (Database-backed for Vercel)
+    // PERSISTENT QUEUE METHODS (Master-owned, Database-backed)
+    // =========================================================
+    // The recovery_queue table resides ONLY on the MASTER node.
+    // This centralizes all retry logic and ensures consistency.
     // =========================================================
 
     /**
-     * Add a missed write to the persistent database queue
-     * Stores in Central node's recovery_queue table
+     * Add a missed write to the MASTER's persistent recovery queue.
+     * 
+     * In Master-Slave replication, when a write fails to replicate to a Slave,
+     * the Master queues it for later retry. This ensures:
+     *   - Single source of truth for pending writes
+     *   - Master retains full control over replication
+     *   - No distributed coordination needed
+     * 
+     * @param {number} partition - Target Slave partition (1 or 2)
+     * @param {number} userId - The user ID being written
+     * @param {string} sql - The SQL INSERT statement
+     * @param {Array} params - Query parameters
+     * @param {Error} error - The error that caused the failure
      */
     static async queueMissedWrite(partition, userId, sql, params, error) {
-        const centralPool = db_router.getCentralNode();
+        // ALWAYS queue on the MASTER (Central) node
+        const masterPool = db_router.getMasterNode();
         let conn;
         try {
-            conn = await centralPool.getConnection();
+            conn = await masterPool.getConnection();
             const insertSql = `
                 INSERT INTO recovery_queue (target_partition, user_id, query_text, params_json, last_error, error_type)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -79,13 +130,14 @@ class db_service {
     }
 
     /**
-     * Get pending writes count from persistent queue
+     * Get pending writes count from MASTER's recovery queue.
+     * This provides visibility into what writes are waiting to be replicated to Slaves.
      */
     static async getPersistentQueueStatus() {
-        const centralPool = db_router.getCentralNode();
+        const masterPool = db_router.getMasterNode();
         let conn;
         try {
-            conn = await centralPool.getConnection();
+            conn = await masterPool.getConnection();
             const [rows] = await conn.query(`
                 SELECT target_partition, COUNT(*) as count 
                 FROM recovery_queue 
@@ -136,19 +188,26 @@ class db_service {
     }
 
     /**
-     * Process persistent queue for a partition
+     * Process MASTER's recovery queue for a specific Slave partition.
+     * 
+     * The MASTER reads pending writes from its queue and attempts to
+     * replicate them to the target Slave. This is the core of the
+     * Master-owned recovery strategy.
+     * 
+     * @param {number} partition - The Slave partition to recover (1 or 2)
+     * @returns {number} - Number of successfully recovered writes
      */
     static async processPersistentQueue(partition) {
-        const centralPool = db_router.getCentralNode();
-        let centralConn;
-        let partitionConn;
+        const masterPool = db_router.getMasterNode();
+        let masterConn;
+        let slaveConn;
         let recoveredCount = 0;
 
         try {
-            centralConn = await centralPool.getConnection();
+            masterConn = await masterPool.getConnection();
             
-            // Get pending writes for this partition
-            const [pending] = await centralConn.query(`
+            // Get pending writes for this Slave from MASTER's queue
+            const [pending] = await masterConn.query(`
                 SELECT id, user_id, query_text, params_json, attempt_count 
                 FROM recovery_queue 
                 WHERE target_partition = ? AND status = 'pending'
@@ -160,16 +219,16 @@ class db_service {
                 return 0;
             }
 
-            console.log(`[Recovery] Partition ${partition}: ${pending.length} pending writes in DB queue`);
+            console.log(`[Recovery] Slave ${partition}: ${pending.length} pending writes in Master's queue`);
             console.log(`[Recovery] Pending IDs: ${pending.map(p => p.user_id).join(', ')}`);
 
-            // Try to connect to partition
-            const partitionPool = db_router.getNodeById(partition);
+            // Try to connect to the Slave
+            const slavePool = db_router.getNodeById(partition);
             
             try {
-                partitionConn = await db_service.connectWithTimeout(partitionPool, 2000);
+                slaveConn = await db_service.connectWithTimeout(slavePool, 2000);
             } catch (connErr) {
-                console.log(`[Recovery] Partition ${partition}: Cannot connect - ${connErr.message}`);
+                console.log(`[Recovery] Slave ${partition}: Cannot connect - ${connErr.message}`);
                 return 0;
             }
 
@@ -178,35 +237,35 @@ class db_service {
                     const params = JSON.parse(write.params_json);
                     const userId = write.user_id;
                     
-                    console.log(`[Recovery] Processing user ${userId} for partition ${partition}`);
+                    console.log(`[Recovery] Processing user ${userId} for Slave ${partition}`);
 
-                    // Check if already exists in partition
-                    const [existing] = await partitionConn.query(
+                    // Check if already exists in Slave
+                    const [existing] = await slaveConn.query(
                         "SELECT id FROM users WHERE id = ?", 
                         [userId]
                     );
 
                     if (existing && existing.length > 0) {
-                        // Already exists, mark as completed
-                        await centralConn.query(
+                        // Already exists, mark as completed in Master's queue
+                        await masterConn.query(
                             "UPDATE recovery_queue SET status = 'completed', last_attempt_at = NOW() WHERE id = ?",
                             [write.id]
                         );
-                        console.log(`[Recovery] ✓ User ${userId} already exists in partition ${partition}, marked complete`);
+                        console.log(`[Recovery] ✓ User ${userId} already exists in Slave ${partition}, marked complete`);
                         recoveredCount++;
                         continue;
                     }
 
-                    // Execute the write to partition
-                    console.log(`[Recovery] Inserting user ${userId} into partition ${partition}...`);
-                    await db_service.queryWithTimeout(partitionConn, write.query_text, params, 2000);
+                    // Execute the write to Slave
+                    console.log(`[Recovery] Inserting user ${userId} into Slave ${partition}...`);
+                    await db_service.queryWithTimeout(slaveConn, write.query_text, params, 2000);
                     
-                    // Mark as completed
-                    await centralConn.query(
+                    // Mark as completed in Master's queue
+                    await masterConn.query(
                         "UPDATE recovery_queue SET status = 'completed', last_attempt_at = NOW() WHERE id = ?",
                         [write.id]
                     );
-                    console.log(`[Recovery] ✓ Recovered user ${userId} to partition ${partition}`);
+                    console.log(`[Recovery] ✓ Recovered user ${userId} to Slave ${partition}`);
                     recoveredCount++;
 
                 } catch (err) {
@@ -214,7 +273,7 @@ class db_service {
                     
                     // Handle duplicate key error
                     if (err.code === 'ER_DUP_ENTRY' || err.message.includes('Duplicate entry')) {
-                        await centralConn.query(
+                        await masterConn.query(
                             "UPDATE recovery_queue SET status = 'completed', last_attempt_at = NOW() WHERE id = ?",
                             [write.id]
                         );
@@ -222,15 +281,15 @@ class db_service {
                         continue;
                     }
 
-                    // Update attempt count
+                    // Update attempt count in Master's queue
                     const newAttemptCount = write.attempt_count + 1;
                     if (newAttemptCount >= 10) {
-                        await centralConn.query(
+                        await masterConn.query(
                             "UPDATE recovery_queue SET status = 'failed', attempt_count = ?, last_error = ?, last_attempt_at = NOW() WHERE id = ?",
                             [newAttemptCount, err.message, write.id]
                         );
                     } else {
-                        await centralConn.query(
+                        await masterConn.query(
                             "UPDATE recovery_queue SET attempt_count = ?, last_error = ?, last_attempt_at = NOW() WHERE id = ?",
                             [newAttemptCount, err.message, write.id]
                         );
@@ -241,17 +300,29 @@ class db_service {
             return recoveredCount;
 
         } catch (err) {
-            console.error(`[Recovery] Partition ${partition} recovery failed:`, err.message);
+            console.error(`[Recovery] Slave ${partition} recovery failed:`, err.message);
             return 0;
         } finally {
-            if (centralConn) centralConn.release();
-            if (partitionConn) partitionConn.release();
+            if (masterConn) masterConn.release();
+            if (slaveConn) slaveConn.release();
         }
     }
 
+    // =========================================================
+    // BACKGROUND RECOVERY MONITOR (Master-orchestrated)
+    // =========================================================
+    // The Master periodically checks Slave health and replays
+    // queued writes when Slaves come back online.
+    // =========================================================
+
     /**
-     * Start the background recovery monitor
-     * Automatically checks for recovered nodes and applies missed writes
+     * Start the background recovery monitor.
+     * 
+     * The Master periodically:
+     *   1. Checks if Slaves are healthy
+     *   2. Reads pending writes from its recovery_queue
+     *   3. Replays writes to recovered Slaves
+     *   4. Updates queue status on completion
      */
     static startRecoveryMonitor(intervalMs = 30000, nodeState = null) {
         if (db_service.recoveryMonitor.enabled) {
@@ -267,7 +338,7 @@ class db_service {
             await db_service.performBackgroundRecovery();
         }, intervalMs);
 
-        console.log(`[Recovery Monitor] Started (interval: ${intervalMs}ms)`);
+        console.log(`[Recovery Monitor] Started on Master (interval: ${intervalMs}ms)`);
         return { success: true, message: "Recovery monitor started" };
     }
 
@@ -288,9 +359,12 @@ class db_service {
     }
 
     /**
-     * Perform background recovery check
-     * This is called automatically by the monitor
-     * Uses BOTH persistent queue (database) and in-memory queue
+     * Perform background recovery check (Master-orchestrated).
+     * 
+     * This runs on the Master and:
+     *   1. Checks each Slave's health
+     *   2. Processes the Master's recovery_queue for healthy Slaves
+     *   3. Reports recovery statistics
      */
     static async performBackgroundRecovery() {
         const checkTime = new Date();
@@ -302,29 +376,29 @@ class db_service {
         let totalRecovered = 0;
         let totalRemaining = 0;
 
-        for (let partition of [1, 2]) {
+        // Check each Slave partition
+        for (let slaveId of [1, 2]) {
             // NOTE: We don't check simulated NODE_STATE here because:
             // 1. On serverless (Vercel), NODE_STATE is not shared between instances
-            // 2. The queue already contains writes that need recovery
-            // 3. We only check ACTUAL database health
+            // 2. The Master's queue already contains writes that need recovery
+            // 3. We only check ACTUAL Slave health
             
-            // Check actual health - can we connect to the partition?
-            const isHealthy = await db_service.isNodeHealthy(partition, 2000);
+            // Check actual Slave health - can the Master connect to it?
+            const isHealthy = await db_service.isNodeHealthy(slaveId, 2000);
             if (!isHealthy) {
-                console.log(`[Recovery] Partition ${partition}: Cannot connect - skipping`);
+                console.log(`[Recovery] Slave ${slaveId}: Cannot connect - skipping`);
                 continue;
             }
             
-            console.log(`[Recovery] Partition ${partition}: Online - processing queue...`);
+            console.log(`[Recovery] Slave ${slaveId}: Online - Master processing queue...`);
 
-            // Try persistent queue first (this is the main queue on Vercel)
-            const persistentRecovered = await db_service.processPersistentQueue(partition);
+            // Process Master's persistent queue (the authoritative source)
+            const persistentRecovered = await db_service.processPersistentQueue(slaveId);
             totalRecovered += persistentRecovered;
             
             // In-memory queue is only for local development fallback
-            // Don't count it in totalRemaining since it's unreliable on serverless
-            if (db_service.missedWrites[partition].length > 0) {
-                const memoryRecovered = await db_service.attemptPartitionRecovery(partition);
+            if (db_service.missedWrites[slaveId].length > 0) {
+                const memoryRecovered = await db_service.attemptPartitionRecovery(slaveId);
                 totalRecovered += memoryRecovered;
             }
             
@@ -334,12 +408,12 @@ class db_service {
             }
         }
 
-        // Get persistent queue status for accurate remaining count (ONLY source of truth)
+        // Get Master's queue status for accurate remaining count
         try {
             const queueStatus = await db_service.getPersistentQueueStatus();
             totalRemaining = queueStatus[1] + queueStatus[2];
         } catch (e) {
-            console.error('[Recovery Monitor] Failed to get queue status:', e.message);
+            console.error('[Recovery Monitor] Failed to get Master queue status:', e.message);
         }
 
         // Update last result
@@ -348,18 +422,18 @@ class db_service {
             recovered: totalRecovered,
             remaining: totalRemaining,
             message: totalRecovered > 0 
-                ? `✓ Recovered ${totalRecovered} write(s). ${totalRemaining} remaining.`
+                ? `✓ Recovered ${totalRecovered} write(s) to Slaves. ${totalRemaining} remaining.`
                 : totalRemaining > 0 
-                    ? `Waiting... ${totalRemaining} write(s) pending.`
-                    : '✓ All queues empty. System healthy.'
+                    ? `Waiting... ${totalRemaining} write(s) pending in Master queue.`
+                    : '✓ All Slaves synced. System healthy.'
         };
 
         if (totalRecovered > 0) {
-            console.log(`[Recovery Monitor] ✓ Recovered ${totalRecovered} writes this cycle`);
+            console.log(`[Recovery Monitor] ✓ Master recovered ${totalRecovered} writes this cycle`);
         } else if (totalRemaining > 0) {
-            console.log(`[Recovery Monitor] ${totalRemaining} writes still pending`);
+            console.log(`[Recovery Monitor] ${totalRemaining} writes pending in Master queue`);
         } else {
-            console.log("[Recovery Monitor] All systems operational");
+            console.log("[Recovery Monitor] All Slaves synced with Master");
         }
     }
 
