@@ -202,13 +202,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             console.log('[Add User] Server response:', result);
             
+            // Check if request failed
+            if (!response.ok || result.success === false) {
+                alert(`Error: ${result.error || 'Failed to add user'}\n\nDetails: ${JSON.stringify(result)}`);
+                return;
+            }
+            
             addTransaction(method === 'POST' ? 'add' : 'edit', data.firstName);
             
             // Show detailed success message
             if (result.queuedForPartition) {
-                alert(`Success! User added to Central Node.\nPartition ${result.queuedForPartition} is offline - write queued for recovery.\nQueue size: ${result.queueSize}`);
+                alert(`Success! User added to Central Node (ID: ${result.id}).\nPartition ${result.queuedForPartition} is offline - write queued for recovery.\nQueue size: ${result.queueSize}`);
             } else {
-                alert("Success! User added to all nodes.");
+                alert(`Success! User added to all nodes (ID: ${result.id}).`);
             }
             
             modal.style.display='none';
