@@ -21,6 +21,6 @@ router.get("/queue/status", failureController.getQueueStatus);
 router.get("/system/health", failureController.getSystemHealth);
 
 // Manual recovery trigger
-router.post("/recover/now", failureController.triggerRecoveryNow);
+router.post("/recover/:partition", failureController.triggerRecovery);
 
 module.exports = router;
